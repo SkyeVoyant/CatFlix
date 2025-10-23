@@ -3,11 +3,25 @@
 Catflix is a self-hosted HLS streaming platform for your personal movie and TV library.  
 It scans your media folders, enriches titles with TMDb metadata, and automatically re-encodes sources into HLS playlists so you can stream privately from any browser while a dedicated FFmpeg worker handles transcoding in the background.
 
+<img src="https://github.com/user-attachments/assets/126ebe11-2990-4ba0-bc9d-82d54e8f70fb" width="100%">
+<div style="display:flex; justify-content:center; gap:4px;">
+  <img src="https://github.com/user-attachments/assets/f79250ac-0411-41cc-a4af-9064ef7e0016" width="49.75%">
+  <img src="https://github.com/user-attachments/assets/94410c9c-087d-4c28-a4b5-9be2a57fb011" width="49.75%">
+</div>
+
 ## Stack Overview
 - **catflix_backend/** – Express API, media library scanner, metadata sync, download/remux endpoints, and HLS manifest publishing
 - **catflix_encoding/** – FFmpeg worker that converts detected files into HLS playlists and notifies the backend when manifests are ready
 - **catflix_frontend/** – React single-page app distributed as a static build for browsing and playback
 - **docker-compose.yml** – Orchestrates the web app (`catflix-app`) and encoder (`catflix-encoder`)
+
+## Frontend Features
+- Search and filter by type (movies vs shows), genres, release year, and sort order (title or release date).
+- Track favourites with one-click starring and quick access from a dedicated section.
+- Automatically builds “Recently Added” and “Continue Watching”/recently watched carousels.
+- Remembers playback position, volume, and resumes seamlessly in supported browsers.
+- Presents TMDb-powered title pages with trailers, cast details, seasons/episodes, and download options.
+- Supports native and HLS.js playback with subtitles (hook ready for future subtitle endpoint).
 
 ## Requirements
 - Docker Engine (Linux host, WSL2, or a Linux VM)
