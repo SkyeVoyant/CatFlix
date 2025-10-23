@@ -1,0 +1,51 @@
+services:
+  catflix-app:
+    build: .
+    container_name: CatFlixApp
+    image: catflix-app:sl.eepy.me
+    ports:
+      - "3004:3004"
+    env_file:
+      - .env
+    environment:
+      - PORT=3004
+      - HLS_ENABLE_TRANSCODER=0
+      - PGHOST=catflix-db
+      - PGPORT=5432
+      - PGUSER=catflix
+      - PGPASSWORD=catflix
+      - PGDATABASE=CatFlixDB
+      - MEDIA_DIR_CONTAINER=/media
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
+    volumes:
+      - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
+    restart: unless-stopped
+    networks:
+      - catflix-net
+
+  catflix-encoder:
+    build: .
+    container_name: CatFlixEncoder
+    image: catflix-encoder:sl.eepy.me
+    env_file:
+      - .env
+    environment:
+      - HLS_ENABLE_TRANSCODER=1
+      - PGHOST=catflix-db
+      - PGPORT=5432
+      - PGUSER=catflix
+      - PGPASSWORD=catflix
+      - PGDATABASE=CatFlixDB
+      - MEDIA_DIR_CONTAINER=/media
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
+      - CATFLIX_NOTIFY_URL=${CATFLIX_NOTIFY_URL:-http://catflix-app:3004/api/media/notify}
+    volumes:
+      - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
+    command: ["node", "../catflix_encoding/index.js"]
+    restart: unless-stopped
+    networks:
+      - catflix-net
+
+networks:
+  catflix-net:
+    external: true

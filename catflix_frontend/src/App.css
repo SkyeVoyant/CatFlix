@@ -1,0 +1,761 @@
+.App {
+  background-color: #141414;
+  color: #fff;
+  min-height: 100vh;
+  padding-top: 60px;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+.navbar {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  height: 60px;
+  background-color: #141414;
+  display: flex;
+  align-items: center;
+  padding: 0 40px 0 20px;
+  z-index: 1000;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.navbar h1 {
+  margin: 0;
+  color: #e50914;
+  font-size: 24px;
+}
+
+.video-nav-title {
+  margin-left: 12px;
+  color: #fff;
+  font-size: 14px;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.section {
+  padding: 20px 0;
+}
+
+.section-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin: 0 auto 10px;
+  text-align: center;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 20px;
+  gap: 10px;
+}
+
+.row::-webkit-scrollbar {
+  display: none;
+}
+
+.card {
+  flex: 0 0 auto;
+  width: 150px;
+  margin: 0 10px 10px;
+  background-color: #222;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, filter 0.2s;
+  position: relative;
+}
+
+.card:hover {
+  transform: scale(1.1);
+  filter: brightness(1.2);
+}
+
+.card img {
+  width: 100%;
+  height: 225px;
+  object-fit: cover;
+}
+
+.title {
+  padding: 8px;
+  font-size: 14px;
+  color: #fff;
+  text-align: left;
+}
+
+.subtitle {
+  padding: 0 8px 8px;
+  font-size: 12px;
+  color: #bbb;
+  text-align: left;
+}
+
+.placeholder {
+  width: 100%;
+  height: 225px;
+  background: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  z-index: 2000;
+}
+
+.modal-content {
+  position: relative;
+  background: #181818;
+  padding: 20px;
+  width: 80%;
+  max-height: 90%;
+  overflow-y: auto;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  color: #fff;
+}
+
+.modal-content img {
+  width: 200px;
+  float: left;
+  margin-right: 20px;
+}
+
+.modal-content p {
+  line-height: 1.4;
+  clear: both;
+}
+
+.season {
+  margin-top: 20px;
+}
+
+.season h3 {
+  color: #fff;
+  margin-bottom: 5px;
+}
+
+.episode {
+  cursor: pointer;
+  padding: 4px;
+  color: #ccc;
+}
+
+.episode:hover {
+  background: #333;
+  color: #fff;
+}
+
+/* Filters */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 10px 20px;
+  gap: 20px;
+  background: #141414;
+  margin-bottom: 30px;
+}
+.filter-group label {
+  margin-right: 10px;
+  font-size: 14px;
+  color: #fff;
+}
+.filter-bar input {
+  margin-right: 5px;
+}
+
+/* Filter Pills */
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.filter-pill {
+  padding: 6px 16px;
+  width: 120px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid #555;
+  border-radius: 20px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.filter-pill.active {
+  background: #e50914;
+  border-color: #e50914;
+}
+
+.filter-pill:hover {
+  background: #333;
+}
+
+/* Hide original checkboxes if any remain */
+.filter-bar input[type="checkbox"] {
+  display: none;
+}
+
+/* Detail Modal Enhancements */
+.detail-poster {
+  width: 200px;
+  float: left;
+  margin-right: 20px;
+  border-radius: 4px;
+  padding-bottom: 20px;
+}
+.details {
+  overflow: hidden;
+}
+.details h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+/* Trailer embed container: fixed 1280×720, scales down to fit */
+.iframe-container {
+  width: 100%;
+  max-width: 480px;
+  margin: 20px auto;
+}
+.iframe-container iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+}
+.cast-section {
+  margin-top: 16px;
+}
+.cast-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.cast-section li {
+  margin: 2px 0;
+  color: #bbb;
+  font-size: 14px;
+}
+.cast-section strong {
+  color: #f0f0f0;
+  font-weight: 600;
+}
+.play-button {
+  background: #e50914;
+  color: #fff;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 20px;
+}
+.play-button.small {
+  padding: 6px 12px;
+  font-size: 14px;
+  margin: 4px;
+}
+
+.movie-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.play-button.download {
+  background: #555;
+}
+.play-button.download:hover {
+  background: #777;
+}
+
+.season-list {
+  clear: both;
+  margin-top: 20px;
+}
+.season-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.season-list h3 {
+  margin-bottom: 10px;
+  color: #fff;
+}
+.download-btn {
+  background: #e50914;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.download-btn:hover {
+  filter: brightness(1.1);
+}
+.download-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Episode thumbnails grid */
+.season-list .episodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.episode-card {
+  background-color: #222;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, filter 0.2s;
+}
+
+.episode-card:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+}
+
+.episode-card img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+}
+
+.episode-placeholder {
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 */
+  background: #333;
+}
+
+.episode-title {
+  padding: 6px 4px;
+  font-size: 14px;
+  color: #fff;
+  text-align: center;
+}
+
+/* Favorite star button */
+.favorite-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0,0,0,0.5);
+  border: none;
+  color: #ffd54f;
+  font-size: 18px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+.favorite-btn:hover {
+  background: rgba(0,0,0,0.7);
+}
+.favorite-btn.active {
+  color: #ffeb3b;
+}
+
+/* Hide/Remove from Recents button (stop sign) */
+.recent-card .hide-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0,0,0,0.5);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+.recent-card:hover .hide-btn {
+  display: flex;
+}
+
+/* Video Modal Above Detail Modal */
+.video-modal { z-index: 3000; }
+
+/* Align main play buttons to the left in detail modal */
+.modal-content .play-button:not(.small) {
+  display: table;
+  margin: 20px 0 0;
+}
+
+/* Video modal tweaks */
+.video-modal video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.video-modal .close-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.video-modal .close-button:hover {
+  opacity: 1;
+}
+
+/* Episode thumbnail video */
+.episode-thumb {
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+  cursor: pointer;
+}
+.episode-thumb::-webkit-media-controls {
+  display: none !important;
+}
+.episode-thumb {
+  border-radius: 4px;
+}
+
+/* Dropdown for Genre Filter */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+.dropbtn {
+  padding: 6px 16px;
+  width: 120px;
+  text-align: center;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 20px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  min-width: unset;
+}
+.dropdown-content {
+  display: none; /* hide by default */
+  position: absolute;
+  top: 100%; /* flush under button */
+  left: 0;
+  min-width: 120px;
+  background-color: #222;
+  border-radius: 20px; /* round edges like pills */
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #555;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  padding: 12px 4px; /* more top/bottom padding to keep arrows inside */
+  z-index: 1000;
+  /* Firefox custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: #e50914 transparent;
+}
+/* Show when dropdown has .open class */
+.dropdown.open .dropdown-content {
+  display: block;
+}
+
+/* Hide scrollbar arrows */
+.dropdown-content::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* Custom scrollbar: only red thumb, no track */
+.dropdown-content::-webkit-scrollbar {
+  width: 6px;
+}
+.dropdown-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dropdown-content::-webkit-scrollbar-thumb {
+  background-color: #e50914;
+  border-radius: 3px;
+  /* inset top/bottom by 2px using transparent border */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Dropdown item default */
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 16px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.dropdown-item input {
+  margin-right: 8px;
+  transform: scale(1.1);
+}
+
+/* Hover highlight */
+.dropdown-item:hover {
+  background: #333; /* slightly lighter gray */
+}
+
+/* Selected item */
+.dropdown-item.active {
+  background: #e50914;
+  border-radius: 4px;
+}
+
+/* Search Bar */
+.search-container {
+  position: relative;
+  width: 120px;
+}
+.search-input {
+  padding: 6px 16px;
+  width: 100%;
+  border: 1px solid #555;
+  border-radius: 20px;
+  background: transparent;
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+}
+.search-input:hover {
+  background: #333;
+}
+.search-input:focus {
+  background: #333;
+  border-color: #e50914;
+}
+.search-input::placeholder {
+  color: #888;
+}
+.search-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+}
+.search-btn:focus {
+  outline: none;
+}
+
+.filter-pill,
+.dropbtn,
+.search-input {
+  box-sizing: border-box;
+}
+
+/* Custom Video Page */
+.video-page {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  z-index: 3000;
+  /* Hide any scrollbar when in media page */
+  overflow: hidden;
+}
+.video-page .navbar {
+  background: #141414;
+  align-items: center;
+}
+.video-page .logo {
+  color: #e50914;
+  cursor: pointer;
+}
+.video-page .video-nav-title {
+  margin-left: 12px;
+}
+.video-wrapper {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #000;
+  overflow: hidden;
+  position: relative;
+}
+.video-player {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.next-overlay {
+  position: absolute;
+  right: 48px;
+  bottom: 68px;
+  padding: 20px 28px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 2px solid #555;
+  border-radius: 14px;
+  cursor: pointer;
+  z-index: 5;
+  font-size: 28px;
+  line-height: 1.2;
+}
+.next-overlay:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.control-bar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background: #141414;
+}
+.control-bar button {
+  margin: 0 8px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+}
+.control-bar button:hover {
+  background: #333;
+}
+.control-bar input[type="range"] {
+  margin: 0 8px;
+  cursor: pointer;
+}
+.control-bar span {
+  color: #fff;
+  margin: 0 8px;
+  font-size: 14px;
+}
+
+/* Removed custom control-bar styles; using native browser controls */
+
+.modal-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: #e50914;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 1001;
+}
+
+.video-close-btn {
+  margin-left: auto;
+  margin-right: 40px;
+  background: #e50914;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* Make Catflix logo clickable */
+.logo {
+  cursor: pointer;
+}
+
+.no-trailer {
+  color: #888;
+  text-align: center;
+  margin: 20px 0;
+}
+
+/* Detail modal two-column layout */
+.detail-top {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 1420px) {
+  .detail-top {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .detail-body {
+    flex: 1;
+  }
+  /* On large desktops, push embed to the right of details */
+  .iframe-container {
+    margin: 20px 0 20px 20px;
+  }
+}
+
+.logout-btn {
+  margin-left: auto;
+  margin-right: 40px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  background: #e50914;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.logout-btn:hover {
+  background: #f40612;
+}
