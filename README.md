@@ -5,8 +5,8 @@ It scans your media folders, enriches titles with TMDb metadata, and automatical
 
 <img src="https://github.com/user-attachments/assets/126ebe11-2990-4ba0-bc9d-82d54e8f70fb" width="100%">
 <div style="display:flex; justify-content:center; gap:4px;">
-  <img src="https://github.com/user-attachments/assets/f79250ac-0411-41cc-a4af-9064ef7e0016" width="49%">
-  <img src="https://github.com/user-attachments/assets/94410c9c-087d-4c28-a4b5-9be2a57fb011" width="49%">
+  <img src="https://github.com/user-attachments/assets/f79250ac-0411-41cc-a4af-9064ef7e0016" width="49.75%">
+  <img src="https://github.com/user-attachments/assets/94410c9c-087d-4c28-a4b5-9be2a57fb011" width="49.75%">
 </div>
 
 ## Stack Overview
@@ -18,10 +18,11 @@ It scans your media folders, enriches titles with TMDb metadata, and automatical
 ## Frontend Features
 - Search and filter by type (movies vs shows), genres, release year, and sort order (title or release date).
 - Track favourites with one-click starring and quick access from a dedicated section.
-- Automatically builds “Recently Added” and “Continue Watching”/recently watched carousels.
+- Automatically builds "Recently Added" and "Continue Watching"/recently watched carousels.
 - Remembers playback position, volume, and resumes seamlessly in supported browsers.
 - Presents TMDb-powered title pages with trailers, cast details, seasons/episodes, and download options.
 - Supports native and HLS.js playback with subtitles (hook ready for future subtitle endpoint).
+- Automatic rating translation: converts TV ratings (TV-MA, TV-14, etc.) to familiar movie ratings (R, PG-13, etc.) with full descriptions.
 
 ## Requirements
 - Docker Engine (Linux host, WSL2, or a Linux VM)
@@ -130,6 +131,39 @@ MEDIA_DIR/
 - Shows should be split by season; Catflix uses the season folder name and the file name to infer episode numbering.
 - Any existing HLS output (`.m3u8`, `.ts`) inside these directories will be picked up automatically; otherwise the encoder will generate them on demand.
 
+## Backup Manifest System
+
+Catflix features a dual-manifest system that provides instant access to all media content:
+
+### How It Works
+- **Primary Manifest (HLS)**: Contains `.m3u8` playlist files for optimized adaptive bitrate streaming
+- **Backup Manifest (Direct)**: Contains original video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.m4v`, `.webm`)
+- **Smart Merging**: Automatically prioritizes HLS when available, falls back to direct video file playback when HLS encoding isn't complete
+
+### Benefits
+- **Instant Library Access**: All content appears immediately, even before HLS encoding finishes
+- **Seamless Upgrades**: Videos automatically switch to HLS streaming once encoding completes
+- **Better User Experience**: No waiting for encoding before watching content
+- **Clear Visibility**: Console logs show HLS count vs backup count vs total: `[media-cache] Manifest built: HLS=45, Backup=123, Total=168`
+
+Each video item includes a `sourceType` field (`'hls'` or `'direct'`) so the frontend can optimize playback accordingly.
+
+### Supported Formats
+HLS streaming is prioritized for optimal performance, but direct playback supports: MP4, MKV, MOV, AVI, M4V, and WEBM files.
+
+## Age Rating Translation
+
+The frontend automatically translates TV ratings to standardized movie ratings for clarity:
+
+| TV Rating | Displayed As | Meaning |
+|-----------|--------------|---------|
+| TV-Y, TV-Y7, TV-G | **G (General Audiences)** | All ages appropriate |
+| TV-PG | **PG (Parental Guidance Suggested)** | Some material may not be suitable for children |
+| TV-14 | **PG-13 (Parents Strongly Cautioned)** | Some material may be inappropriate for children under 13 |
+| TV-MA | **R (Restricted)** | Under 17 requires accompanying parent or adult guardian |
+
+Movie ratings (G, PG, PG-13, R, NC-17) are displayed with their full descriptions as well. This provides consistent, easy-to-understand age ratings across all content.
+
 ## Run with Docker Compose
 1. Clone the repo
    ```bash
@@ -168,11 +202,11 @@ MEDIA_DIR/
 
 ## Developing Without Docker
 - Install dependencies:  
-  `npm install` in `catflix_backend/` (also installs shared deps for `catflix_encoding/`), `npm install` in `catflix_frontend/`
+  `pnpm install` in `catflix_backend/` (also installs shared deps for `catflix_encoding/`), `pnpm install` in `catflix_frontend/`
 - Start services:
-  - Backend: `npm start` inside `catflix_backend/`
+  - Backend: `pnpm start` inside `catflix_backend/`
   - Encoder: `node ../catflix_encoding/index.js`
-  - Frontend (dev server): `npm start` inside `catflix_frontend/`
+  - Frontend (dev server): `pnpm start` inside `catflix_frontend/`
 - Ensure PostgreSQL and the `.env` file are available; the backend will still perform schema creation on launch.
 
 ## License

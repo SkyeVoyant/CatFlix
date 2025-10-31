@@ -4,11 +4,14 @@
 FROM node:20-bookworm AS frontend-builder
 WORKDIR /app/catflix_frontend
 
-COPY catflix_frontend/package*.json ./
-RUN npm ci
+# Enable pnpm
+RUN corepack enable pnpm
+
+COPY catflix_frontend/package.json catflix_frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --shamefully-hoist
 
 COPY catflix_frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 # Runtime stage for backend + encoder
 FROM node:20-bookworm-slim AS runner
@@ -17,9 +20,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
-COPY catflix_backend/package*.json ./catflix_backend/
+# Enable pnpm
+RUN corepack enable pnpm
+
+COPY catflix_backend/package.json catflix_backend/pnpm-lock.yaml ./catflix_backend/
 WORKDIR /app/catflix_backend
-RUN npm ci
+RUN pnpm install --frozen-lockfile --prod
 
 WORKDIR /app
 COPY catflix_backend ./catflix_backend
