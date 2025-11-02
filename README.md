@@ -5,8 +5,8 @@ It scans your media folders, enriches titles with TMDb metadata, and automatical
 
 <img src="https://github.com/user-attachments/assets/126ebe11-2990-4ba0-bc9d-82d54e8f70fb" width="100%">
 <div style="display:flex; justify-content:center; gap:4px;">
-  <img src="https://github.com/user-attachments/assets/f79250ac-0411-41cc-a4af-9064ef7e0016" width="49.75%">
-  <img src="https://github.com/user-attachments/assets/94410c9c-087d-4c28-a4b5-9be2a57fb011" width="49.75%">
+  <img src="https://github.com/user-attachments/assets/f79250ac-0411-41cc-a4af-9064ef7e0016" width="49.5%">
+  <img src="https://github.com/user-attachments/assets/94410c9c-087d-4c28-a4b5-9be2a57fb011" width="49.5%">
 </div>
 
 ## Stack Overview
