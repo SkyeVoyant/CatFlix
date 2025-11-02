@@ -168,13 +168,17 @@ async function fetchMovieDownloadJob(movieIdParam) {
       if (partRelative) {
         descriptor = descriptor || part?.title || movie.title;
         cacheKeyBase = cacheKeyBase || `movie-${sanitizeCacheKey(partRelative)}`;
+        const partSourceType = part?.sourceType || 'hls';
+        // For direct videos, sourceRelative should point to the actual video file
+        const finalSourceRelative = partSourceType === 'direct' ? partRelative : sourceRelative;
         return {
           job: {
             type: 'movie',
             descriptor: descriptor || `movie-${movieIdParam}`,
-            sourceRelative,
+            sourceRelative: finalSourceRelative,
             hlsRelative: partRelative,
-            cacheKey: cacheKeyBase
+            cacheKey: cacheKeyBase,
+            sourceType: partSourceType
           },
           descriptor: descriptor || movie.title || `movie-${movieIdParam}`
         };
@@ -188,13 +192,15 @@ async function fetchMovieDownloadJob(movieIdParam) {
 
   descriptor = descriptor || `movie-${row?.movie_id ?? movieIdParam}`;
   cacheKeyBase = cacheKeyBase || `movie-${sanitizeCacheKey(resolvedRelative)}`;
+  const sourceType = resolvedRelative.endsWith('.m3u8') ? 'hls' : 'direct';
   return {
     job: {
       type: 'movie',
       descriptor,
       sourceRelative,
       hlsRelative: resolvedRelative,
-      cacheKey: cacheKeyBase
+      cacheKey: cacheKeyBase,
+      sourceType
     },
     descriptor
   };
@@ -233,13 +239,17 @@ async function fetchEpisodeDownloadJob(episodeIdParam) {
       if (relFromManifest) {
         descriptor = descriptor || `${manifestMatch.show?.title || 'Show'} ${manifestMatch.season?.season || ''} ${episode.title || ''}`.trim() || `episode-${episodeIdParam}`;
         cacheKeyBase = cacheKeyBase || `episode-${sanitizeCacheKey(relFromManifest)}`;
+        const episodeSourceType = episode?.sourceType || 'hls';
+        // For direct videos, sourceRelative should point to the actual video file
+        const finalSourceRelative = episodeSourceType === 'direct' ? relFromManifest : sourceRelative;
         return {
           job: {
             type: 'episode',
             descriptor,
-            sourceRelative,
+            sourceRelative: finalSourceRelative,
             hlsRelative: relFromManifest,
-            cacheKey: cacheKeyBase
+            cacheKey: cacheKeyBase,
+            sourceType: episodeSourceType
           },
           descriptor
         };
@@ -253,13 +263,15 @@ async function fetchEpisodeDownloadJob(episodeIdParam) {
 
   descriptor = descriptor || `episode-${row?.episode_id ?? episodeIdParam}`;
   cacheKeyBase = cacheKeyBase || `episode-${sanitizeCacheKey(resolvedRelative)}`;
+  const sourceType = resolvedRelative.endsWith('.m3u8') ? 'hls' : 'direct';
   return {
     job: {
       type: 'episode',
       descriptor,
       sourceRelative,
       hlsRelative: resolvedRelative,
-      cacheKey: cacheKeyBase
+      cacheKey: cacheKeyBase,
+      sourceType
     },
     descriptor
   };
