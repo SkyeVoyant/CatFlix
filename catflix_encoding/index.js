@@ -60,17 +60,33 @@ const HLS_MASTER_PLAYLIST_NAME = process.env.HLS_MASTER_PLAYLIST_NAME || '%b.m3u
 const HLS_VARIANT_PLAYLIST_TEMPLATE = process.env.HLS_VARIANT_PLAYLIST_TEMPLATE || '%b.m3u8';
 const HLS_SEGMENT_TEMPLATE = process.env.HLS_SEGMENT_TEMPLATE || '%b_%05d.ts';
 const HLS_CONCURRENCY = Math.max(1, Number(process.env.HLS_MAX_CONCURRENCY || 1));
+const HLS_KEYFRAME_INTERVAL = Number(process.env.HLS_KEYFRAME_INTERVAL || 60);
+const HLS_RESCAN_DEBOUNCE_MS = Number(process.env.HLS_RESCAN_DEBOUNCE_MS || 2000);
+
+// Movie encoding settings
 const HLS_HIGH_VIDEO_BITRATE = process.env.HLS_HIGH_VIDEO_BITRATE || '6000k';
 const HLS_HIGH_MAX_BITRATE = process.env.HLS_HIGH_MAX_BITRATE || '7500k';
 const HLS_HIGH_AUDIO_BITRATE = process.env.HLS_HIGH_AUDIO_BITRATE || '320k';
 const HLS_AUDIO_CHANNELS_HIGH = Number(process.env.HLS_HIGH_AUDIO_CHANNELS || 2);
 const HLS_HIGH_RESOLUTION = process.env.HLS_HIGH_RESOLUTION || '1920x1080';
 const HLS_HIGH_BUF_SIZE = process.env.HLS_HIGH_BUF_SIZE || '';
-const HLS_KEYFRAME_INTERVAL = Number(process.env.HLS_KEYFRAME_INTERVAL || 60);
+const HLS_HIGH_CRF = process.env.HLS_HIGH_CRF || '';
 const HLS_FFMPEG_PRESET = process.env.HLS_FFMPEG_PRESET || 'slow';
 const HLS_FFMPEG_TUNE = process.env.HLS_FFMPEG_TUNE || '';
 const HLS_FFMPEG_THREADS = process.env.HLS_FFMPEG_THREADS || '';
-const HLS_RESCAN_DEBOUNCE_MS = Number(process.env.HLS_RESCAN_DEBOUNCE_MS || 2000);
+
+// Show encoding settings (with fallbacks to movie settings)
+const SHOWS_HIGH_VIDEO_BITRATE = process.env.SHOWS_HIGH_VIDEO_BITRATE || HLS_HIGH_VIDEO_BITRATE;
+const SHOWS_HIGH_MAX_BITRATE = process.env.SHOWS_HIGH_MAX_BITRATE || HLS_HIGH_MAX_BITRATE;
+const SHOWS_HIGH_AUDIO_BITRATE = process.env.SHOWS_HIGH_AUDIO_BITRATE || HLS_HIGH_AUDIO_BITRATE;
+const SHOWS_AUDIO_CHANNELS_HIGH = Number(process.env.SHOWS_HIGH_AUDIO_CHANNELS || HLS_AUDIO_CHANNELS_HIGH);
+const SHOWS_HIGH_RESOLUTION = process.env.SHOWS_HIGH_RESOLUTION || HLS_HIGH_RESOLUTION;
+const SHOWS_HIGH_BUF_SIZE = process.env.SHOWS_HIGH_BUF_SIZE || HLS_HIGH_BUF_SIZE;
+const SHOWS_HIGH_CRF = process.env.SHOWS_HIGH_CRF || HLS_HIGH_CRF;
+const SHOWS_FFMPEG_PRESET = process.env.SHOWS_FFMPEG_PRESET || HLS_FFMPEG_PRESET;
+const SHOWS_FFMPEG_TUNE = process.env.SHOWS_FFMPEG_TUNE || HLS_FFMPEG_TUNE;
+const SHOWS_FFMPEG_THREADS = process.env.SHOWS_FFMPEG_THREADS || HLS_FFMPEG_THREADS;
+
 const HLS_FFMPEG_THREADS_TOTAL = Number(process.env.HLS_FFMPEG_THREADS || 0);
 const HLS_FFMPEG_THREADS_PER_JOB_OVERRIDE = Number(process.env.HLS_FFMPEG_THREADS_PER_JOB || 0);
 const HLS_THREADS_PER_JOB = (() => {
@@ -585,6 +601,19 @@ function resolveMediaDir() {
 }
 
 function buildFfmpegArgs(job) {
+  // Select encoding settings based on job type
+  const isShow = job.type === 'episode';
+  const videoBitrate = isShow ? SHOWS_HIGH_VIDEO_BITRATE : HLS_HIGH_VIDEO_BITRATE;
+  const maxBitrate = isShow ? SHOWS_HIGH_MAX_BITRATE : HLS_HIGH_MAX_BITRATE;
+  const audioBitrate = isShow ? SHOWS_HIGH_AUDIO_BITRATE : HLS_HIGH_AUDIO_BITRATE;
+  const audioChannels = isShow ? SHOWS_AUDIO_CHANNELS_HIGH : HLS_AUDIO_CHANNELS_HIGH;
+  const resolution = isShow ? SHOWS_HIGH_RESOLUTION : HLS_HIGH_RESOLUTION;
+  const bufSizeOverride = isShow ? SHOWS_HIGH_BUF_SIZE : HLS_HIGH_BUF_SIZE;
+  const crf = isShow ? SHOWS_HIGH_CRF : HLS_HIGH_CRF;
+  const preset = isShow ? SHOWS_FFMPEG_PRESET : HLS_FFMPEG_PRESET;
+  const tune = isShow ? SHOWS_FFMPEG_TUNE : HLS_FFMPEG_TUNE;
+  const threads = isShow ? SHOWS_FFMPEG_THREADS : HLS_FFMPEG_THREADS;
+
   const masterRelative = toPosix(job.layout.masterRelative || '');
   const variantTemplateRelative = toPosix(job.layout.variantTemplateRelative || '');
   const segmentTemplateRelative = toPosix(job.layout.segmentTemplateRelative || '');
@@ -595,12 +624,12 @@ function buildFfmpegArgs(job) {
   const hasVariantIndexToken = typeof variantTemplateRelative === 'string' && variantTemplateRelative.includes('%v');
   const hasSegmentIndexToken = typeof segmentTemplateRelative === 'string' && segmentTemplateRelative.includes('%v');
   const useVariantStreamMap = hasVariantIndexToken || hasSegmentIndexToken;
-  const bufSize = resolveBufSize(HLS_HIGH_MAX_BITRATE, HLS_HIGH_BUF_SIZE);
+  const bufSize = resolveBufSize(maxBitrate, bufSizeOverride);
   const keyframeInterval = Number.isFinite(HLS_KEYFRAME_INTERVAL) && HLS_KEYFRAME_INTERVAL > 0
     ? Math.floor(HLS_KEYFRAME_INTERVAL)
     : Math.max(1, Math.round(HLS_SEGMENT_DURATION * 2));
   const filterParts = [];
-  const { width, height } = parseResolution(HLS_HIGH_RESOLUTION, null);
+  const { width, height } = parseResolution(resolution, null);
   if (width && height) {
     filterParts.push(`scale=w=${width}:h=${height}:force_original_aspect_ratio=decrease:force_divisible_by=2`);
   } else if (width) {
@@ -633,10 +662,10 @@ function buildFfmpegArgs(job) {
     '-c:v',
     'libx264',
     '-preset',
-    HLS_FFMPEG_PRESET
+    preset
   );
-  if (HLS_FFMPEG_TUNE) {
-    args.push('-tune', HLS_FFMPEG_TUNE);
+  if (tune) {
+    args.push('-tune', tune);
   }
   args.push(
     '-pix_fmt',
@@ -644,9 +673,9 @@ function buildFfmpegArgs(job) {
     '-profile:v',
     'high',
     '-b:v',
-    HLS_HIGH_VIDEO_BITRATE,
+    videoBitrate,
     '-maxrate',
-    HLS_HIGH_MAX_BITRATE
+    maxBitrate
   );
   if (bufSize) {
     args.push('-bufsize', bufSize);
@@ -659,19 +688,19 @@ function buildFfmpegArgs(job) {
     '-sc_threshold',
     '0'
   );
-  if (HLS_FFMPEG_THREADS) {
-    args.push('-threads', String(HLS_FFMPEG_THREADS));
+  if (threads) {
+    args.push('-threads', String(threads));
   }
   args.push(
     '-c:a',
     'aac'
   );
-  if (HLS_HIGH_AUDIO_BITRATE) {
-    args.push('-b:a', HLS_HIGH_AUDIO_BITRATE);
+  if (audioBitrate) {
+    args.push('-b:a', audioBitrate);
   }
   args.push(
     '-ac',
-    String(HLS_AUDIO_CHANNELS_HIGH),
+    String(audioChannels),
     '-hls_time',
     String(HLS_SEGMENT_DURATION),
     '-hls_playlist_type',
