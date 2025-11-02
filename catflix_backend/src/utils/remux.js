@@ -148,18 +148,57 @@ function runFfmpegRemux(inputPath, outputPath, titleForLogs = 'remux') {
 async function streamFileAsDownload(res, filePath, options = {}) {
   const stat = await fsp.stat(filePath);
   const filename = options.filename || path.basename(filePath);
-  res.setHeader('Content-Type', 'video/mp4');
+  
+  // Determine Content-Type based on file extension
+  const ext = path.extname(filePath).toLowerCase();
+  const contentTypeMap = {
+    '.mp4': 'video/mp4',
+    '.mkv': 'video/x-matroska',
+    '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo',
+    '.m4v': 'video/x-m4v',
+    '.webm': 'video/webm'
+  };
+  const contentType = contentTypeMap[ext] || 'video/mp4';
+  
+  res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Length', String(stat.size));
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
   const stream = fs.createReadStream(filePath);
   await pipeline(stream, res);
 }
 
-async function ensureRemuxedFile({ type, descriptor, sourceRelative, hlsRelative, cacheKey }) {
-  const { computeHlsLayout } = require('./hls');
+async function ensureRemuxedFile({ type, descriptor, sourceRelative, hlsRelative, cacheKey, sourceType }) {
   const { toPosix, fromPosix } = require('./path');
+  const { pathExists } = require('./fs');
   const MEDIA_DIR = config.MEDIA_DIR;
 
+  // Check if this is a direct video file (no remux needed)
+  const isDirectVideo = sourceType === 'direct' || (!hlsRelative?.endsWith('.m3u8') && sourceRelative && !sourceRelative.endsWith('.m3u8'));
+  
+  if (isDirectVideo && sourceRelative) {
+    // Direct video file - just prepare to stream the original file
+    const sourceAbsolute = path.join(MEDIA_DIR, fromPosix(sourceRelative));
+    if (!(await pathExists(sourceAbsolute))) {
+      throw new Error('Direct video file missing on disk');
+    }
+    
+    // Determine the file extension and use appropriate filename
+    const ext = path.extname(sourceRelative);
+    const filename = `${sanitizeFilename(descriptor)}${ext}`;
+    
+    // For direct video, we don't need caching - return the source file directly
+    return { 
+      filePath: sourceAbsolute, 
+      filename, 
+      sessionId: null,
+      isDirect: true 
+    };
+  }
+
+  // HLS remux path (original logic)
+  const { computeHlsLayout } = require('./hls');
+  
   const layout = computeHlsLayout({
     type,
     sourceRelativePath: sourceRelative ? toPosix(sourceRelative) : null,
@@ -173,7 +212,6 @@ async function ensureRemuxedFile({ type, descriptor, sourceRelative, hlsRelative
     throw new Error('No HLS master playlist available');
   }
   const masterAbsolute = path.join(MEDIA_DIR, fromPosix(masterRelative));
-  const { pathExists } = require('./fs');
   if (!(await pathExists(masterAbsolute))) {
     throw new Error('HLS playlist missing on disk');
   }
@@ -229,6 +267,11 @@ async function streamRemuxResult(res, remuxInfo, { deleteAfter = false } = {}) {
   try {
     await streamFileAsDownload(res, remuxInfo.filePath, { filename: remuxInfo.filename });
   } finally {
+    // Direct video files don't need cleanup (they're not cached)
+    if (remuxInfo.isDirect) {
+      return;
+    }
+    
     if (deleteAfter) {
       await removeFileQuietly(remuxInfo.filePath);
       dropRemuxSession(remuxInfo.sessionId);
