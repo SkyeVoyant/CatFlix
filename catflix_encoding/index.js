@@ -256,6 +256,14 @@ async function prepareJobEnvironment(job) {
   if (segments.highestIndex >= 0) {
     const resumeInfo = buildResumeInfoFromSegments(segments);
     if (resumeInfo) {
+      // When resuming, check if variant playlist exists
+      const variantPlaylistPath = getVariantPlaylistPath(job);
+      const variantExists = await pathExists(variantPlaylistPath);
+      if (!variantExists) {
+        // Variant playlist is missing, need to rebuild it from segments
+        console.log(`[encoder] Variant playlist missing for resume, will rebuild: ${job.displayName}`);
+        await rebuildVariantPlaylist(job, segments);
+      }
       return { resumeInfo };
     }
   }
@@ -467,6 +475,76 @@ function buildResumeInfoFromSegments(segments) {
 function extractTrailingNumber(name) {
   const m = name.match(/(\d+)(?=\.[^.]+$)/);
   return m ? m[1] : null;
+}
+
+function getVariantPlaylistPath(job) {
+  const variantTemplateRelative = toPosix(job.layout.variantTemplateRelative || '');
+  const masterRelative = toPosix(job.layout.masterRelative || '');
+  const variantPath = path.join(MEDIA_DIR, fromPosix(variantTemplateRelative || masterRelative || 'stream.m3u8'));
+  // Replace %v with variant index (we use 0 for single variant)
+  return variantPath.replace(/%v/g, '0');
+}
+
+async function rebuildVariantPlaylist(job, segments) {
+  const variantPath = getVariantPlaylistPath(job);
+  
+  // Read all segment files to build the playlist
+  const segmentFiles = [];
+  const names = await fsPromises.readdir(job.segmentDirAbsolute).catch(() => []);
+  
+  for (const name of names) {
+    if (!job.segmentRegex || !job.segmentRegex.test(name)) continue;
+    
+    // Extract segment index
+    if (job.segmentRegex.global || job.segmentRegex.sticky) {
+      job.segmentRegex.lastIndex = 0;
+    }
+    const match = job.segmentRegex.exec(name);
+    if (!match) continue;
+    
+    const groupIndex = Number.isInteger(job.segmentRegex.segmentIndexGroup)
+      ? job.segmentRegex.segmentIndexGroup
+      : match.length - 1;
+    const value = match[groupIndex] ?? match[match.length - 1];
+    if (value === undefined) continue;
+    
+    const index = parseInt(value, 10);
+    if (!Number.isFinite(index)) continue;
+    
+    const fullPath = path.join(job.segmentDirAbsolute, name);
+    const stats = await fsPromises.stat(fullPath).catch(() => null);
+    if (!stats) continue;
+    
+    segmentFiles.push({ name, index });
+  }
+  
+  // Sort by index
+  segmentFiles.sort((a, b) => a.index - b.index);
+  
+  if (segmentFiles.length === 0) {
+    console.warn('[encoder] No segments found to rebuild variant playlist');
+    return;
+  }
+  
+  // Build the m3u8 content
+  const lines = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    `#EXT-X-TARGETDURATION:${Math.ceil(HLS_SEGMENT_DURATION)}`,
+    '#EXT-X-MEDIA-SEQUENCE:0'
+  ];
+  
+  // Add each segment
+  for (const seg of segmentFiles) {
+    lines.push(`#EXTINF:${HLS_SEGMENT_DURATION.toFixed(6)},`);
+    lines.push(seg.name);
+  }
+  
+  // Don't add EXT-X-ENDLIST yet since we're resuming
+  const content = lines.join('\n') + '\n';
+  
+  await fsPromises.writeFile(variantPath, content, 'utf8');
+  console.log(`[encoder] Rebuilt variant playlist with ${segmentFiles.length} segments: ${variantPath}`);
 }
 
 async function removeHlsArtifacts(job) {
