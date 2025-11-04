@@ -158,6 +158,31 @@ async function collectM3u8Files(dirPath) {
   }
 }
 
+async function collectVideoFiles(dirPath) {
+  try {
+    const entries = await fsp.readdir(dirPath, { withFileTypes: true });
+    const results = [];
+    const videoExtensions = ['.mp4', '.mkv', '.mov', '.avi', '.m4v', '.webm'];
+    
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!videoExtensions.includes(ext)) continue;
+      
+      const fullPath = path.join(dirPath, entry.name);
+      const stat = await fsp.stat(fullPath).catch(() => null);
+      results.push({
+        fullPath,
+        baseTitle: path.basename(entry.name, path.extname(entry.name)),
+        mtimeMs: stat ? Math.round(stat.mtimeMs) : null
+      });
+    }
+    return results;
+  } catch (_) {
+    return [];
+  }
+}
+
 function maxTimestamp(items) {
   return items.reduce((max, item) => {
     const candidate = item?.mtimeMs ?? item?.addedAt ?? 0;
@@ -182,7 +207,8 @@ async function loadMoviesFromFs() {
           title: playlist.baseTitle,
           relative: relativePosix,
           src: toVideoSrc(relativePosix),
-          addedAt: playlist.mtimeMs
+          addedAt: playlist.mtimeMs,
+          sourceType: 'hls'
         };
       })
       .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
@@ -193,6 +219,43 @@ async function loadMoviesFromFs() {
       addedAt: maxTimestamp(playlists)
     });
   }
+  movies.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+  return movies;
+}
+
+async function loadMoviesFromVideoFiles() {
+  const moviesDir = path.join(config.MEDIA_DIR, 'movies');
+  const entries = await safeReaddir(moviesDir);
+  const movies = [];
+  
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const moviePath = path.join(moviesDir, entry.name);
+    const videoFiles = await collectVideoFiles(moviePath);
+    if (videoFiles.length === 0) continue;
+    
+    const parts = videoFiles
+      .map((video, idx) => {
+        const relativePosix = toPosix(path.relative(config.MEDIA_DIR, video.fullPath));
+        return {
+          id: idx,
+          title: video.baseTitle,
+          relative: relativePosix,
+          src: toVideoSrc(relativePosix),
+          addedAt: video.mtimeMs,
+          sourceType: 'direct'
+        };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+    
+    movies.push({
+      title: entry.name,
+      folderRelative: toPosix(path.relative(config.MEDIA_DIR, moviePath)),
+      parts,
+      addedAt: maxTimestamp(videoFiles)
+    });
+  }
+  
   movies.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
   return movies;
 }
@@ -208,7 +271,8 @@ async function loadSeasonEpisodes(seasonPath) {
       relative: relativePosix,
       src: toVideoSrc(relativePosix),
       addedAt: playlist.mtimeMs,
-      episodeNumber: inferEpisodeNumber(playlist.baseTitle)
+      episodeNumber: inferEpisodeNumber(playlist.baseTitle),
+      sourceType: 'hls'
     });
   }
 
@@ -226,7 +290,54 @@ async function loadSeasonEpisodes(seasonPath) {
         relative: relativePosix,
         src: toVideoSrc(relativePosix),
         addedAt: playlist.mtimeMs,
-        episodeNumber: inferEpisodeNumber(displayTitle)
+        episodeNumber: inferEpisodeNumber(displayTitle),
+        sourceType: 'hls'
+      });
+    }
+  }
+
+  episodes.sort((a, b) => {
+    const numA = Number.isFinite(a.episodeNumber) ? a.episodeNumber : Number.MAX_SAFE_INTEGER;
+    const numB = Number.isFinite(b.episodeNumber) ? b.episodeNumber : Number.MAX_SAFE_INTEGER;
+    if (numA !== numB) return numA - numB;
+    return a.title.localeCompare(b.title, undefined, { numeric: true });
+  });
+
+  return episodes;
+}
+
+async function loadSeasonEpisodesFromVideoFiles(seasonPath) {
+  const episodes = [];
+
+  const videoFiles = await collectVideoFiles(seasonPath);
+  for (const video of videoFiles) {
+    const relativePosix = toPosix(path.relative(config.MEDIA_DIR, video.fullPath));
+    episodes.push({
+      title: video.baseTitle,
+      relative: relativePosix,
+      src: toVideoSrc(relativePosix),
+      addedAt: video.mtimeMs,
+      episodeNumber: inferEpisodeNumber(video.baseTitle),
+      sourceType: 'direct'
+    });
+  }
+
+  const entries = await safeReaddir(seasonPath);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const episodeDir = path.join(seasonPath, entry.name);
+    const videoFiles = await collectVideoFiles(episodeDir);
+    if (videoFiles.length === 0) continue;
+    for (const video of videoFiles) {
+      const relativePosix = toPosix(path.relative(config.MEDIA_DIR, video.fullPath));
+      const displayTitle = video.baseTitle || entry.name;
+      episodes.push({
+        title: displayTitle,
+        relative: relativePosix,
+        src: toVideoSrc(relativePosix),
+        addedAt: video.mtimeMs,
+        episodeNumber: inferEpisodeNumber(displayTitle),
+        sourceType: 'direct'
       });
     }
   }
@@ -269,6 +380,42 @@ async function loadShowsFromFs() {
       addedAt: maxTimestamp(seasons)
     });
   }
+  shows.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+  return shows;
+}
+
+async function loadShowsFromVideoFiles() {
+  const showsDir = path.join(config.MEDIA_DIR, 'shows');
+  const showEntries = await safeReaddir(showsDir);
+  const shows = [];
+  
+  for (const showEntry of showEntries) {
+    if (!showEntry.isDirectory()) continue;
+    const showPath = path.join(showsDir, showEntry.name);
+    const seasonEntries = await safeReaddir(showPath);
+    const seasons = [];
+    
+    for (const seasonEntry of seasonEntries) {
+      if (!seasonEntry.isDirectory()) continue;
+      const seasonPath = path.join(showPath, seasonEntry.name);
+      const episodes = await loadSeasonEpisodesFromVideoFiles(seasonPath);
+      if (episodes.length === 0) continue;
+      seasons.push({
+        season: seasonEntry.name,
+        episodes,
+        addedAt: maxTimestamp(episodes)
+      });
+    }
+    
+    if (seasons.length === 0) continue;
+    seasons.sort((a, b) => a.season.localeCompare(b.season, undefined, { numeric: true }));
+    shows.push({
+      title: showEntry.name,
+      seasons,
+      addedAt: maxTimestamp(seasons)
+    });
+  }
+  
   shows.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
   return shows;
 }
@@ -436,7 +583,103 @@ function sortSeasonEpisodes(season) {
   });
 }
 
-function ensureMoviePartInCache({ movieTitle, folderRelative, relative, descriptor }) {
+function normalizeForComparison(str) {
+  return (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+}
+
+function mergeMovieManifests(hlsMovies, backupMovies) {
+  const result = [];
+  const hlsMoviesByTitle = new Map();
+  
+  for (const hlsMovie of hlsMovies) {
+    const key = normalizeForComparison(hlsMovie.title);
+    hlsMoviesByTitle.set(key, hlsMovie);
+    result.push(hlsMovie);
+  }
+  
+  for (const backupMovie of backupMovies) {
+    const key = normalizeForComparison(backupMovie.title);
+    const existingHls = hlsMoviesByTitle.get(key);
+    
+    if (existingHls) {
+      const existingHlsPaths = new Set(existingHls.parts.map(p => normalizePathKey(p.relative)));
+      const backupParts = backupMovie.parts.filter(part => {
+        const backupBaseName = normalizeForComparison(part.title);
+        const matchExists = existingHls.parts.some(hlsPart => 
+          normalizeForComparison(hlsPart.title) === backupBaseName
+        );
+        return !matchExists;
+      });
+      
+      if (backupParts.length > 0) {
+        existingHls.parts.push(...backupParts);
+        sortMovieParts(existingHls);
+      }
+    } else {
+      result.push(backupMovie);
+      hlsMoviesByTitle.set(key, backupMovie);
+    }
+  }
+  
+  result.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+  return result;
+}
+
+function mergeShowManifests(hlsShows, backupShows) {
+  const result = [];
+  const hlsShowsByTitle = new Map();
+  
+  for (const hlsShow of hlsShows) {
+    const key = normalizeForComparison(hlsShow.title);
+    hlsShowsByTitle.set(key, hlsShow);
+    result.push(hlsShow);
+  }
+  
+  for (const backupShow of backupShows) {
+    const key = normalizeForComparison(backupShow.title);
+    const existingHls = hlsShowsByTitle.get(key);
+    
+    if (existingHls) {
+      const hlsSeasonsByLabel = new Map();
+      for (const season of existingHls.seasons) {
+        hlsSeasonsByLabel.set(normalizeForComparison(season.season), season);
+      }
+      
+      for (const backupSeason of backupShow.seasons) {
+        const seasonKey = normalizeForComparison(backupSeason.season);
+        const existingSeason = hlsSeasonsByLabel.get(seasonKey);
+        
+        if (existingSeason) {
+          const existingEpisodeTitles = new Set(
+            existingSeason.episodes.map(ep => normalizeForComparison(ep.title))
+          );
+          
+          const backupEpisodes = backupSeason.episodes.filter(ep => 
+            !existingEpisodeTitles.has(normalizeForComparison(ep.title))
+          );
+          
+          if (backupEpisodes.length > 0) {
+            existingSeason.episodes.push(...backupEpisodes);
+            sortSeasonEpisodes(existingSeason);
+          }
+        } else {
+          existingHls.seasons.push(backupSeason);
+          hlsSeasonsByLabel.set(seasonKey, backupSeason);
+        }
+      }
+      
+      sortShowSeasons(existingHls);
+    } else {
+      result.push(backupShow);
+      hlsShowsByTitle.set(key, backupShow);
+    }
+  }
+  
+  result.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+  return result;
+}
+
+function ensureMoviePartInCache({ movieTitle, folderRelative, relative, descriptor, sourceType }) {
   const normalizedTitle = normalizeTitle(movieTitle);
   let movie = cachedMedia.movies.find((m) => normalizeTitle(m.title) === normalizedTitle);
   if (!movie) {
@@ -450,6 +693,18 @@ function ensureMoviePartInCache({ movieTitle, folderRelative, relative, descript
     cachedMedia.movies.push(movie);
   }
   movie.id = movie.id ?? generateMovieId(movieTitle);
+  
+  // If adding HLS version, remove any direct video file with same base name
+  if (sourceType === 'hls') {
+    const normalizedDescriptor = normalizeForComparison(descriptor);
+    movie.parts = movie.parts.filter(p => {
+      if (p.sourceType === 'direct' && normalizeForComparison(p.title) === normalizedDescriptor) {
+        return false; // Remove direct video file when HLS version is available
+      }
+      return true;
+    });
+  }
+  
   let part = movie.parts.find((p) => p.relative === relative);
   if (!part) {
     part = {
@@ -457,12 +712,14 @@ function ensureMoviePartInCache({ movieTitle, folderRelative, relative, descript
       title: descriptor,
       relative,
       src: toVideoSrc(relative),
-      addedAt: Date.now()
+      addedAt: Date.now(),
+      sourceType: sourceType || 'hls'
     };
     movie.parts.push(part);
   } else {
     part.title = descriptor;
     part.addedAt = Date.now();
+    part.sourceType = sourceType || part.sourceType || 'hls';
   }
   movie.folderRelative = folderRelative || movie.folderRelative;
   movie.addedAt = Date.now();
@@ -470,7 +727,7 @@ function ensureMoviePartInCache({ movieTitle, folderRelative, relative, descript
   sortMoviesList();
 }
 
-function ensureShowEpisodeInCache({ showTitle, seasonLabel, relative, descriptor, episodeNumber }) {
+function ensureShowEpisodeInCache({ showTitle, seasonLabel, relative, descriptor, episodeNumber, sourceType }) {
   const normalizedShow = normalizeTitle(showTitle);
   let show = cachedMedia.shows.find((s) => normalizeTitle(s.title) === normalizedShow);
   if (!show) {
@@ -495,6 +752,18 @@ function ensureShowEpisodeInCache({ showTitle, seasonLabel, relative, descriptor
     show.seasons.push(season);
   }
   season.id = season.id ?? generateSeasonId(show.id, seasonLabel);
+  
+  // If adding HLS version, remove any direct video file with same base name
+  if (sourceType === 'hls') {
+    const normalizedDescriptor = normalizeForComparison(descriptor);
+    season.episodes = season.episodes.filter(ep => {
+      if (ep.sourceType === 'direct' && normalizeForComparison(ep.title) === normalizedDescriptor) {
+        return false; // Remove direct video file when HLS version is available
+      }
+      return true;
+    });
+  }
+  
   let episode = season.episodes.find((ep) => ep.relative === relative);
   if (!episode) {
     episode = {
@@ -504,13 +773,15 @@ function ensureShowEpisodeInCache({ showTitle, seasonLabel, relative, descriptor
       src: toVideoSrc(relative),
       episodeNumber: Number.isFinite(episodeNumber) ? episodeNumber : inferEpisodeNumber(descriptor),
       addedAt: Date.now(),
-      previewSrc: null
+      previewSrc: null,
+      sourceType: sourceType || 'hls'
     };
     season.episodes.push(episode);
   } else {
     episode.title = descriptor;
     episode.episodeNumber = Number.isFinite(episodeNumber) ? episodeNumber : episode.episodeNumber;
     episode.addedAt = Date.now();
+    episode.sourceType = sourceType || episode.sourceType || 'hls';
   }
   season.addedAt = Date.now();
   show.addedAt = Date.now();
@@ -520,13 +791,26 @@ function ensureShowEpisodeInCache({ showTitle, seasonLabel, relative, descriptor
 }
 
 async function buildManifest() {
-  const [moviesFs, showsFs, dbIndex] = await Promise.all([
+  const [moviesHls, showsHls, moviesBackup, showsBackup, dbIndex] = await Promise.all([
     loadMoviesFromFs(),
     loadShowsFromFs(),
+    loadMoviesFromVideoFiles(),
+    loadShowsFromVideoFiles(),
     loadDbIndexes()
   ]);
-  const movies = attachMovieDbData(moviesFs, dbIndex);
-  const shows = attachShowDbData(showsFs, dbIndex);
+  
+  const mergedMoviesFs = mergeMovieManifests(moviesHls, moviesBackup);
+  const mergedShowsFs = mergeShowManifests(showsHls, showsBackup);
+  
+  const movies = attachMovieDbData(mergedMoviesFs, dbIndex);
+  const shows = attachShowDbData(mergedShowsFs, dbIndex);
+  
+  const hlsCount = moviesHls.length + showsHls.reduce((sum, s) => sum + s.seasons.reduce((sum2, season) => sum2 + season.episodes.length, 0), 0);
+  const backupCount = moviesBackup.length + showsBackup.reduce((sum, s) => sum + s.seasons.reduce((sum2, season) => sum2 + season.episodes.length, 0), 0);
+  const totalCount = movies.length + shows.reduce((sum, s) => sum + s.seasons.reduce((sum2, season) => sum2 + season.episodes.length, 0), 0);
+  
+  console.log(`[media-cache] Manifest built: HLS=${hlsCount}, Backup=${backupCount}, Total=${totalCount}`);
+  
   return { movies, shows };
 }
 
@@ -618,7 +902,8 @@ async function registerMediaAsset({
   showTitle,
   seasonLabel,
   episodeTitle,
-  episodeNumber
+  episodeNumber,
+  sourceType
 }) {
   await ensureCacheReady();
   const resolvedRelative = await resolveRelativeAgainstDisk(masterRelative);
@@ -627,6 +912,8 @@ async function registerMediaAsset({
   }
   const relativePosix = resolvedRelative;
   const displayName = descriptor || path.basename(relativePosix, path.extname(relativePosix));
+  const finalSourceType = sourceType || (relativePosix.endsWith('.m3u8') ? 'hls' : 'direct');
+  
   if (type === 'movie') {
     const movieInfo = deriveMovieInfoFromRelative(relativePosix);
     const resolvedTitle = movieTitle || movieInfo?.movieTitle;
@@ -638,7 +925,8 @@ async function registerMediaAsset({
       movieTitle: resolvedTitle,
       folderRelative,
       relative: relativePosix,
-      descriptor: displayName
+      descriptor: displayName,
+      sourceType: finalSourceType
     });
     await refreshMetadataForTitles({ movies: [resolvedTitle] });
   } else {
@@ -654,7 +942,8 @@ async function registerMediaAsset({
       seasonLabel: resolvedSeasonLabel,
       relative: relativePosix,
       descriptor: resolvedEpisodeTitle,
-      episodeNumber
+      episodeNumber,
+      sourceType: finalSourceType
     });
     await refreshMetadataForTitles({ shows: [resolvedShowTitle] });
   }
