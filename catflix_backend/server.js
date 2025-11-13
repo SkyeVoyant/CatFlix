@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const cookieParser = require('cookie-parser');
 const fs = require('fs');
 const config = require('./src/config');
@@ -8,6 +9,7 @@ const authRoutes = require('./src/routes/auth');
 const mediaRoutes = require('./src/routes/media');
 const downloadRoutes = require('./src/routes/downloads');
 const mediaCache = require('./src/services/mediaCache');
+const { setupManifestSocket, setSnapshotProvider } = require('./src/services/manifestEvents');
 
 const app = express();
 app.use(cookieParser());
@@ -58,6 +60,10 @@ app.use('/api/downloads', downloadRoutes);
 
 app.use('/videos', express.static(config.MEDIA_DIR));
 
+const server = http.createServer(app);
+setSnapshotProvider(() => mediaCache.getMediaCache());
+setupManifestSocket(server);
+
 if (fs.existsSync(config.CLIENT_BUILD_DIR)) {
   app.use(express.static(config.CLIENT_BUILD_DIR));
   app.use((req, res) => {
@@ -82,7 +88,7 @@ async function startServer() {
     process.exit(1);
   }
 
-  app.listen(config.PORT, async () => {
+  server.listen(config.PORT, async () => {
     console.log(`Catflix backend listening on port ${config.PORT}`);
     console.log(`[config] Media directory: ${config.MEDIA_DIR}`);
     mediaCache
