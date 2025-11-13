@@ -59,7 +59,19 @@ const SCHEMA_STATEMENTS = [
       added_at TIMESTAMPTZ DEFAULT NOW()
    )`,
   `CREATE INDEX IF NOT EXISTS idx_episodes_season_id ON episodes (season_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_episodes_relative_path ON episodes (relative_path)`
+  `CREATE INDEX IF NOT EXISTS idx_episodes_relative_path ON episodes (relative_path)`,
+  `CREATE TABLE IF NOT EXISTS media_manifest_entries (
+      id BIGSERIAL PRIMARY KEY,
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('movie','show')),
+      title TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      added_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (entity_type, title)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_manifest_entity_type ON media_manifest_entries (entity_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_manifest_title_lower ON media_manifest_entries (entity_type, LOWER(title))`,
+  `CREATE INDEX IF NOT EXISTS idx_manifest_added_at ON media_manifest_entries (added_at DESC)`
 ];
 
 async function ensureDatabaseSchema() {
