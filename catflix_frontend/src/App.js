@@ -5,6 +5,38 @@ import './App.css';
 
 const SESSION_KEY = 'catflix_session_token_v1';
 
+// Translate TV and movie ratings to standardized format with full descriptions
+function translateRating(rating) {
+  if (!rating) return null;
+  
+  const ratingMap = {
+    // TV Ratings
+    'TV-Y': { short: 'G', full: 'General Audiences' },
+    'TV-Y7': { short: 'G', full: 'General Audiences' },
+    'TV-G': { short: 'G', full: 'General Audiences' },
+    'TV-PG': { short: 'PG', full: 'Parental Guidance Suggested' },
+    'TV-14': { short: 'PG-13', full: 'Parents Strongly Cautioned' },
+    'TV-MA': { short: 'R', full: 'Restricted' },
+    
+    // Movie Ratings (pass through with descriptions)
+    'G': { short: 'G', full: 'General Audiences' },
+    'PG': { short: 'PG', full: 'Parental Guidance Suggested' },
+    'PG-13': { short: 'PG-13', full: 'Parents Strongly Cautioned' },
+    'R': { short: 'R', full: 'Restricted' },
+    'NC-17': { short: 'NC-17', full: 'Adults Only' },
+    'NR': { short: 'NR', full: 'Not Rated' },
+    'UR': { short: 'UR', full: 'Unrated' }
+  };
+  
+  const translated = ratingMap[rating];
+  if (translated) {
+    return `${translated.short} (${translated.full})`;
+  }
+  
+  // If not in map, return as-is
+  return rating;
+}
+
 function App() {
   const [movies, setMovies] = useState([]);
   const [shows, setShows] = useState([]);
@@ -31,6 +63,12 @@ function App() {
   const videoRef = useRef(null);
   const hlsInstanceRef = useRef(null);
   const lastRecentSaveRef = useRef(0);
+  const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const moviesMapRef = useRef(new Map());
+  const showsMapRef = useRef(new Map());
+  const metaCacheRef = useRef(new Map());
+  const pendingMetaRef = useRef(new Set());
   const sortOptions = [
     'Title A-Z',
     'Title Z-A',
@@ -116,6 +154,18 @@ function App() {
     });
   };
 
+  const alphaSort = useCallback(
+    (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }),
+    []
+  );
+
+  const syncStateFromMaps = useCallback(() => {
+    const sortedMovies = Array.from(moviesMapRef.current.values()).sort(alphaSort);
+    const sortedShows = Array.from(showsMapRef.current.values()).sort(alphaSort);
+    setMovies(sortedMovies);
+    setShows(sortedShows);
+  }, [alphaSort]);
+
   const parseFromSrc = (src, title) => {
     try {
       const parts = src.split('/').map(decodeURIComponent);
@@ -137,6 +187,66 @@ function App() {
     } catch {}
     return { type: 'movie', movieTitle: title || src };
   };
+
+  const ensureMetadata = useCallback((item) => {
+    if (!item?.title) return;
+    const key = `${item.type}:${item.title}`;
+    if (metaCacheRef.current.has(key) || pendingMetaRef.current.has(key)) return;
+    pendingMetaRef.current.add(key);
+    const typeParam = item.type === 'show' ? 'tv' : 'movie';
+    fetch(`/api/metadata?title=${encodeURIComponent(item.title)}&type=${typeParam}`, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null)
+      .then((meta) => {
+        pendingMetaRef.current.delete(key);
+        metaCacheRef.current.set(key, meta);
+        const map = item.type === 'show' ? showsMapRef.current : moviesMapRef.current;
+        if (map.has(item.title)) {
+          map.set(item.title, { ...map.get(item.title), meta });
+          syncStateFromMaps();
+        }
+      });
+  }, [syncStateFromMaps]);
+
+  const applyUpsertEvent = useCallback((payload, entityType) => {
+    if (!payload?.title) return;
+    const normalizedType = entityType === 'show' || payload.type === 'show' ? 'show' : 'movie';
+    const normalized = {
+      ...payload,
+      type: normalizedType
+    };
+    if (normalizedType === 'movie') {
+      normalized.parts = Array.isArray(normalized.parts) ? normalized.parts : [];
+    } else {
+      normalized.seasons = Array.isArray(normalized.seasons) ? normalized.seasons : [];
+    }
+    const metaKey = `${normalized.type}:${normalized.title}`;
+    if (metaCacheRef.current.has(metaKey)) {
+      normalized.meta = metaCacheRef.current.get(metaKey);
+    }
+    const map = normalizedType === 'show' ? showsMapRef.current : moviesMapRef.current;
+    map.set(normalized.title, normalized);
+    syncStateFromMaps();
+    ensureMetadata(normalized);
+  }, [ensureMetadata, syncStateFromMaps]);
+
+  const applyDeleteEvent = useCallback((title, entityType) => {
+    if (!title) return;
+    const normalizedType = entityType === 'show' ? 'show' : 'movie';
+    const map = normalizedType === 'show' ? showsMapRef.current : moviesMapRef.current;
+    if (map.delete(title)) {
+      syncStateFromMaps();
+    }
+  }, [syncStateFromMaps]);
+
+  const handleManifestEvent = useCallback((event) => {
+    if (!event) return;
+    if (event.action === 'upsert') {
+      applyUpsertEvent(event.payload, event.entityType);
+    } else if (event.action === 'delete') {
+      applyDeleteEvent(event.title, event.entityType);
+    }
+  }, [applyUpsertEvent, applyDeleteEvent]);
 
   const upsertRecent = useCallback(({ src, info, stoppedAt }) => {
     const updatedAt = Date.now();
@@ -315,97 +425,98 @@ function App() {
   }, []);
 
   useEffect(() => {
-    async function fetchMedia() {
-      setLoading(true);
-      try {
-        const res = await fetch('/api/media', { credentials: 'include' });
-        const data = await res.json();
-        const mediaMovies = (data.movies || []).map(movie => ({
-          ...movie,
-          type: 'movie',
-          parts: Array.isArray(movie.parts)
-            ? movie.parts.map((part, idx) => ({
-                id: part.id ?? idx,
-                title: part.title,
-                src: part.src
-              }))
-            : []
-        }));
-        const mediaShows = (data.shows || []).map(show => ({
-          ...show,
-          type: 'show',
-          seasons: Array.isArray(show.seasons)
-            ? show.seasons.map((season, sIdx) => ({
-                id: season.id ?? sIdx,
-                season: season.season,
-                episodes: Array.isArray(season.episodes)
-                  ? season.episodes.map((ep, eIdx) => ({
-                      id: ep.id ?? eIdx,
-                      title: ep.title,
-                      src: ep.src,
-                      previewSrc: ep.previewSrc
-                    }))
-                  : []
-              }))
-            : []
-        }));
-
-        const moviesWithMeta = await Promise.all(mediaMovies.map(async movie => {
-          try {
-            const metaRes = await fetch(`/api/metadata?title=${encodeURIComponent(movie.title)}&type=movie`, { credentials: 'include' });
-            if (!metaRes.ok) throw new Error();
-            const meta = await metaRes.json();
-            return { ...movie, meta };
-          } catch {
-            return { ...movie, meta: null };
-          }
-        }));
-
-        const showsWithMeta = await Promise.all(mediaShows.map(async show => {
-          try {
-            const metaRes = await fetch(`/api/metadata?title=${encodeURIComponent(show.title)}&type=tv`, { credentials: 'include' });
-            if (!metaRes.ok) throw new Error();
-            const meta = await metaRes.json();
-            return { ...show, meta };
-          } catch {
-            return { ...show, meta: null };
-          }
-        }));
-
-        setMovies(moviesWithMeta);
-        setShows(showsWithMeta);
-        // build genre list
-        const all = [...moviesWithMeta, ...showsWithMeta];
-        const genreSet = new Set();
-        all.forEach(item => {
-          if (item.meta?.genres) item.meta.genres.forEach(g => genreSet.add(g.name));
-        });
-        setGenres([...genreSet].sort());
-        // Build release decade options
-        const mediaList = [...moviesWithMeta, ...showsWithMeta];
-        const yearsSet = new Set();
-        mediaList.forEach(item => {
-          if (item.meta) {
-            const dateStr = item.meta.release_date || item.meta.first_air_date;
-            if (dateStr) {
-              const yearNum = parseInt(dateStr.slice(0, 4), 10);
-              if (!isNaN(yearNum)) yearsSet.add(Math.floor(yearNum / 10) * 10);
-            }
-          }
-        });
-        const decades = [...yearsSet].sort((a, b) => b - a).map(d => `${d}s`);
-        setReleaseOptions(decades);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchMedia();
     loadRecent();
     loadFavorites();
     loadHiddenRecents();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const handleSocketMessage = (data) => {
+      if (!data) return;
+      if (data.type === 'sync') {
+        if (data.phase === 'start') {
+          moviesMapRef.current = new Map();
+          showsMapRef.current = new Map();
+          syncStateFromMaps();
+          setLoading(true);
+        } else if (data.phase === 'complete' || data.phase === 'error') {
+          setLoading(false);
+        }
+        return;
+      }
+      const events = [];
+      if (data.type === 'batch' && Array.isArray(data.events)) {
+        events.push(...data.events);
+      } else if (data.type === 'event' && data.event) {
+        events.push(data.event);
+      }
+      events.forEach(handleManifestEvent);
+    };
+
+    function connect() {
+      if (cancelled) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const socket = new WebSocket(`${protocol}://${window.location.host}/ws/manifest`);
+      wsRef.current = socket;
+      socket.onopen = () => {
+        if (!cancelled) {
+          setLoading(true);
+        }
+      };
+      socket.onmessage = (event) => {
+        if (cancelled) return;
+        try {
+          const payload = JSON.parse(event.data);
+          handleSocketMessage(payload);
+        } catch (err) {
+          console.error('[ws] failed to parse message', err);
+        }
+      };
+      socket.onerror = () => {
+        socket.close();
+      };
+      socket.onclose = () => {
+        if (cancelled) return;
+        setLoading(false);
+        reconnectTimerRef.current = setTimeout(connect, 3000);
+      };
+    }
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+      }
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch (_) {}
+      }
+    };
+  }, [handleManifestEvent, syncStateFromMaps]);
+
+  useEffect(() => {
+    const allItems = [...movies, ...shows];
+    const genreSet = new Set();
+    allItems.forEach(item => {
+      if (item.meta?.genres) {
+        item.meta.genres.forEach(g => genreSet.add(g.name));
+      }
+    });
+    setGenres([...genreSet].sort());
+    const yearsSet = new Set();
+    allItems.forEach(item => {
+      const dateStr = item.meta?.release_date || item.meta?.first_air_date;
+      if (!dateStr) return;
+      const yearNum = parseInt(dateStr.slice(0, 4), 10);
+      if (!isNaN(yearNum)) {
+        yearsSet.add(Math.floor(yearNum / 10) * 10);
+      }
+    });
+    const decades = [...yearsSet].sort((a, b) => b - a).map(d => `${d}s`);
+    setReleaseOptions(decades);
+  }, [movies, shows]);
 
   // Configure video element for MP4/HLS playback
   useEffect(() => {
@@ -736,8 +847,13 @@ function App() {
                     {showDetail.meta.vote_average && (
                       <p><strong>Rating:</strong> {showDetail.meta.vote_average}/10</p>
                     )}
-                    {showDetail.meta.release_dates && (
-                      <p><strong>Certification:</strong> {(showDetail.meta.release_dates.results.find(r => r.iso_3166_1 === 'US')?.release_dates[0].certification) || 'N/A'}</p>
+                    {(showDetail.meta.content_ratings || showDetail.meta.release_dates) && (
+                      <p><strong>Age Rating:</strong> {
+                        translateRating(
+                          showDetail.meta.content_ratings?.results.find(r => r.iso_3166_1 === 'US')?.rating ||
+                          showDetail.meta.release_dates?.results.find(r => r.iso_3166_1 === 'US')?.release_dates[0].certification
+                        ) || 'N/A'
+                      }</p>
                     )}
                     {renderCastList(showDetail.meta)}
                   </div>
