@@ -1,7 +1,9 @@
+<div align="center">
+
 # Catflix
 
-Catflix is a self-hosted HLS streaming platform for your personal movie and TV library.  
-It scans your media folders, enriches titles with TMDb metadata, and automatically re-encodes sources into HLS playlists so you can stream privately from any browser while a dedicated FFmpeg worker handles transcoding in the background.
+Self-hosted HLS streaming for your personal movie + TV library.  
+Catflix scans your media folders, enriches titles with TMDb metadata, and re-encodes into adaptive HLS playlists so you can stream privately from any browser while a dedicated FFmpeg worker handles heavy lifting in the background.
 
 <img src="https://github.com/user-attachments/assets/126ebe11-2990-4ba0-bc9d-82d54e8f70fb" width="100%">
 <div style="display:flex; justify-content:center; gap:4px;">
@@ -9,20 +11,38 @@ It scans your media folders, enriches titles with TMDb metadata, and automatical
   <img src="https://github.com/user-attachments/assets/94410c9c-087d-4c28-a4b5-9be2a57fb011" width="49.5%">
 </div>
 
-## Stack Overview
-- **catflix_backend/** – Express API, media library scanner, metadata sync, download/remux endpoints, and HLS manifest publishing
-- **catflix_encoding/** – FFmpeg worker that converts detected files into HLS playlists and notifies the backend when manifests are ready
-- **catflix_frontend/** – React single-page app distributed as a static build for browsing and playback
-- **docker-compose.yml** – Orchestrates the web app (`catflix-app`) and encoder (`catflix-encoder`)
+</div>
 
-## Frontend Features
-- Search and filter by type (movies vs shows), genres, release year, and sort order (title or release date).
-- Track favourites with one-click starring and quick access from a dedicated section.
-- Automatically builds "Recently Added" and "Continue Watching"/recently watched carousels.
-- Remembers playback position, volume, and resumes seamlessly in supported browsers.
-- Presents TMDb-powered title pages with trailers, cast details, seasons/episodes, and download options.
-- Supports native and HLS.js playback with subtitles (hook ready for future subtitle endpoint).
-- Automatic rating translation: converts TV ratings (TV-MA, TV-14, etc.) to familiar movie ratings (R, PG-13, etc.) with full descriptions.
+## Highlights
+
+- **Instant startup** – the manifest now lives in Postgres; restarts pull it straight from the DB and stream updates over websockets, so the UI fills in live without reloads.
+- **Real-time ingestion** – the encoder notifies the backend as soon as an episode/movie is ready, which upserts the manifest row and pushes that single change to every connected client.
+- **Dual-source playback** – HLS playlists are preferred, but direct video files stay available until encoding completes, so nothing disappears while jobs run.
+- **Rich UI** – favourites, recently added/watched carousels, metadata-driven detail pages (cast, trailers, certifications) and automatic TV → movie rating translation.
+- **Privacy-first** – single-password gate, no third-party telemetry, everything stays on your hardware.
+
+## Architecture
+
+| Component | Description |
+|-----------|-------------|
+| **catflix_backend/** | Express API, manifest synchroniser, metadata backfill, remux/download endpoints, websocket broadcaster. |
+| **catflix_encoding/** | FFmpeg worker that watches the library, produces HLS renditions, and notifies the backend per asset. |
+| **catflix_frontend/** | React SPA served as static assets; now consumes manifest updates over `/ws/manifest` so the UI updates entry-by-entry. |
+| **docker-compose.yml** | Builds/ships both services plus shares media + credentials through `.env`. |
+
+### Data flow
+1. Backend boots, loads the persisted manifest from `media_manifest_entries`, and serves it immediately.
+2. Background scanner diffs the filesystem against the DB table and writes only the rows that changed.
+3. Clients open the websocket, receive the latest snapshot chunk-by-chunk, then stay live as new entries arrive or old ones disappear.
+4. Encoder/notify endpoint can upsert a single movie or show without triggering a full rebuild.
+
+## Feature Tour
+
+- Full-text search, genre + decade filters, and title/release sorting.
+- “Recently Added” and “Continue Watching” carousels fed by the DB timestamps (no filesystem heuristics).
+- Resume points, remembered volume, favourite tagging, and quick download actions (movie or entire season).
+- TMDb integration for posters, cast, trailers, and certification translation (TV ratings mapped to familiar MPAA-style descriptors).
+- Native HLS playback via `<video>` on Safari/iOS and HLS.js fallback elsewhere; subtitle hook ready for future endpoint.
 
 ## Requirements
 - Docker Engine (Linux host, WSL2, or a Linux VM)
@@ -77,7 +97,7 @@ GRANT ALL PRIVILEGES ON DATABASE "CatFlixDB" TO catflix;
 ```
 
 Adjust names if you prefer different credentials; just reflect them in `.env`.  
-The backend will take care of creating the tables (`movies`, `movie_files`, `shows`, `seasons`, `episodes`) the first time it connects.
+The backend will take care of creating the tables (`movies`, `movie_files`, `shows`, `seasons`, `episodes`, `media_manifest_entries`) the first time it connects.
 
 ## Environment Configuration
 Duplicate the sample file and edit the values to match your setup:
@@ -131,25 +151,17 @@ MEDIA_DIR/
 - Shows should be split by season; Catflix uses the season folder name and the file name to infer episode numbering.
 - Any existing HLS output (`.m3u8`, `.ts`) inside these directories will be picked up automatically; otherwise the encoder will generate them on demand.
 
-## Backup Manifest System
+## Manifest Persistence + Live Updates
 
-Catflix features a dual-manifest system that provides instant access to all media content:
+| Layer | Purpose |
+|-------|---------|
+| **`media_manifest_entries` table** | Stores every movie/show manifest row (payload JSONB + timestamps). Startup simply `SELECT`s from this table—no full rescan required. |
+| **Scanner** | Still walks the filesystem in the background, but now diffs against the DB and only touches rows that changed (zero cache thrash). |
+| **Websocket (`/ws/manifest`)** | Streams a snapshot on connect, then pushes incremental `upsert`/`delete` events. The frontend applies them immediately, so new episodes surface seconds after encoding finishes. |
+| **Source fallback** | Each episode/movie includes `sourceType` (`hls` or `direct`). Direct files remain playable until the FFmpeg worker produces an HLS master playlist, at which point the manifest automatically flips over. |
 
-### How It Works
-- **Primary Manifest (HLS)**: Contains `.m3u8` playlist files for optimized adaptive bitrate streaming
-- **Backup Manifest (Direct)**: Contains original video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.m4v`, `.webm`)
-- **Smart Merging**: Automatically prioritizes HLS when available, falls back to direct video file playback when HLS encoding isn't complete
-
-### Benefits
-- **Instant Library Access**: All content appears immediately, even before HLS encoding finishes
-- **Seamless Upgrades**: Videos automatically switch to HLS streaming once encoding completes
-- **Better User Experience**: No waiting for encoding before watching content
-- **Clear Visibility**: Console logs show HLS count vs backup count vs total: `[media-cache] Manifest built: HLS=45, Backup=123, Total=168`
-
-Each video item includes a `sourceType` field (`'hls'` or `'direct'`) so the frontend can optimize playback accordingly.
-
-### Supported Formats
-HLS streaming is prioritized for optimal performance, but direct playback supports: MP4, MKV, MOV, AVI, M4V, and WEBM files.
+Console log example:  
+`[media-cache] Manifest built: HLS=4427, Backup=2819, Total=5991` – you always know how much is fully HLS-ready vs still using backup sources.
 
 ## Age Rating Translation
 
@@ -164,40 +176,38 @@ The frontend automatically translates TV ratings to standardized movie ratings f
 
 Movie ratings (G, PG, PG-13, R, NC-17) are displayed with their full descriptions as well. This provides consistent, easy-to-understand age ratings across all content.
 
-## Run with Docker Compose
-1. Clone the repo
-   ```bash
-   git clone https://github.com/SkyeVoyant/Catflix.git
-   cd Catflix
-   ```
-2. Ensure the shared Docker network and PostgreSQL service exist (see “Database Setup” above):  
-   ```bash
-   docker network create catflix-net   # skip if it already exists
-   ```  
-   and either start the bundled Postgres container or point to an existing server.
-3. Configure `.env` as described. In particular:
-   - Set `MEDIA_DIR` / `MEDIA_MOUNT_SOURCE` to match your environment (e.g., `D:\Media` + `/mnt/d/Media` on Windows/WSL, `/srv/media` on native Linux).
-   - Fill in the TMDb key and database credentials you created earlier.
-4. Launch the stack
-   ```bash
-   docker compose up -d --build
-   ```
-5. Open `http://localhost:3004`, sign in with the password you set, and the library will begin scanning.  
-   The backend logs confirm the schema check and media refresh on first boot.
+## Quick Start (Docker Compose)
+```bash
+git clone https://github.com/SkyeVoyant/Catflix.git
+cd Catflix
 
-## Daily Operations
+cp .env.example .env                      # fill in PASSWORD, TMDB_API_KEY, MEDIA paths, DB creds
+docker network create catflix-net        # once per host
+# start Postgres (either reuse /root/databases/catflix or run your own)
+docker compose up -d --build             # builds frontend+backend+encoder
+```
+Visit `http://localhost:3004`, log in with the password from `.env`, and watch the library populate instantly from the DB snapshot while the background scanner/encoder keeps refining entries.
+
 - Pause encoding to save CPU: `docker compose stop catflix-encoder`
-- Resume encoding: `docker compose start catflix-encoder`
-- Tail logs:
-  - Backend: `docker compose logs -f catflix-app`
+- Resume later: `docker compose start catflix-encoder`
+- Tail logs  
+  - Backend: `docker compose logs -f catflix-app`  
   - Encoder: `docker compose logs -f catflix-encoder`
-- Trigger a manual rescan: `docker compose restart catflix-app`
-- Back up the database: snapshot the Postgres data volume or run `pg_dump` using the credentials in `.env`
+- Force a manual rebuild (if needed): `docker exec CatFlixApp node -e "require('./src/services/mediaCache').refreshMediaCache('manual')"`
+- Back up the DB: snapshot the Postgres volume or run `pg_dump` with the credentials from `.env`.
 
 ## Troubleshooting
-- **Cannot connect to database** – double-check the values under the database block in `.env`; the backend will log connection failures before exiting.
-- **Library appears empty** – ensure `MEDIA_DIR` points to a path mounted into the containers and that the user running Docker has read access.
-- **Metadata missing** – revalidate your TMDb key (`TMDB_API_KEY`) and inspect backend logs for TMDb rate-limit warnings.
+
+| Issue | Fix |
+|-------|-----|
+| Empty UI after login | Verify the DB is reachable (`docker logs CatFlixApp`) and `media_manifest_entries` has rows (run `SELECT count(*)` in Postgres). |
+| Metadata missing | Double-check `TMDB_API_KEY` and inspect backend logs for TMDb errors/rate limits. |
+| Media path problems | Confirm `MEDIA_DIR`, `MEDIA_DIR_OUT`, and `MEDIA_MOUNT_SOURCE` are aligned (Windows path ↔️ WSL mount ↔️ Docker volume). |
+| Encoder hammering CPU | Lower `HLS_MAX_CONCURRENCY` in `.env` or temporarily stop the encoder container. |
+
+---
+
+Catflix is built for personal media servers: fast startup, resilient manifests, low-maintenance Docker workflow, and a UI that keeps pace with your library in real time.
 - **Encoder idle** – check `catflix-encoder` logs; the worker reports when media paths are missing or jobs are already processed.
 
 ## Developing Without Docker

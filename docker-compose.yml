@@ -19,7 +19,6 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
     volumes:
       - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
-      - "${DOWNLOADS_MOUNT_SOURCE:-./downloads}:/app/catflix_backend/frontend/build/downloads"
     restart: unless-stopped
     networks:
       - catflix-net
