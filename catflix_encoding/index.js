@@ -13,6 +13,21 @@ const dotenv = (() => {
     }
   }
 })();
+const fetch = (() => {
+  try {
+    return require('node-fetch');
+  } catch (err) {
+    try {
+      return require('../catflix_backend/node_modules/node-fetch');
+    } catch (fallbackErr) {
+      if (typeof globalThis.fetch === 'function') {
+        return globalThis.fetch;
+      }
+      err.message = `${err.message}. Install backend dependencies (node-fetch) or use Node.js 18+.`;
+      throw err;
+    }
+  }
+})();
 const { spawn } = require('child_process');
 
 const pathPosix = path.posix;
@@ -362,6 +377,26 @@ async function collectShowJobs(root, jobList, watchDirs) {
   }
 }
 
+function inferEpisodeNumber(fileName) {
+  const patterns = [
+    /[sS]\d+[eE](\d+)/,
+    /[eE]pisode\s*(\d+)/i,
+    /[eE]p\.?\s*(\d+)/i,
+    /[-\s](\d{1,3})[-\s\.]/,
+    /\b(\d{1,3})\b/
+  ];
+  for (const pattern of patterns) {
+    const match = fileName.match(pattern);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (Number.isFinite(num) && num > 0 && num < 9999) {
+        return num;
+      }
+    }
+  }
+  return null;
+}
+
 async function buildEpisodeJob(showTitle, seasonLabel, seasonDir, fileName, watchDirs) {
   const sourceAbsolute = path.join(seasonDir, fileName);
   const sourceRelative = toPosix(path.relative(MEDIA_DIR, sourceAbsolute));
@@ -381,6 +416,7 @@ async function buildEpisodeJob(showTitle, seasonLabel, seasonDir, fileName, watc
 
   const segmentRegex = buildSegmentRegex(layout.segmentTemplateRelative, layout.baseName);
   const segments = await listSegments(episodeDirAbsolute, segmentRegex, layout.baseName);
+  const episodeNumber = inferEpisodeNumber(fileName) || inferEpisodeNumber(layout.baseName);
 
   return {
     key: layout.masterRelative,
@@ -395,7 +431,8 @@ async function buildEpisodeJob(showTitle, seasonLabel, seasonDir, fileName, watc
     layout,
     segmentRegex,
     baseName: layout.baseName,
-    nextIndex: segments.highestIndex
+    nextIndex: segments.highestIndex,
+    episodeNumber
   };
 }
 
