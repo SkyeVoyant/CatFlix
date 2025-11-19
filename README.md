@@ -1,9 +1,9 @@
 <div align="center">
 
-# Catflix
+# Catflix (Open Source)
 
-Self-hosted HLS streaming for your personal movie + TV library.  
-Catflix scans your media folders, enriches titles with TMDb metadata, and re-encodes into adaptive HLS playlists so you can stream privately from any browser while a dedicated FFmpeg worker handles heavy lifting in the background.
+Self-hosted streaming platform for your personal movie and TV library.  
+Automatically scan, encode, enrich with metadata, generate subtitles, and stream from any browser with a clean, Netflix-inspired interface.
 
 <img src="https://github.com/user-attachments/assets/126ebe11-2990-4ba0-bc9d-82d54e8f70fb" width="100%">
 <div style="display:flex; justify-content:center; gap:4px;">
@@ -13,51 +13,72 @@ Catflix scans your media folders, enriches titles with TMDb metadata, and re-enc
 
 </div>
 
-## Highlights
+## Features
 
-- **Instant startup** – the manifest now lives in Postgres; restarts pull it straight from the DB and stream updates over websockets, so the UI fills in live without reloads.
-- **Real-time ingestion** – the encoder notifies the backend as soon as an episode/movie is ready, which upserts the manifest row and pushes that single change to every connected client.
-- **Dual-source playback** – HLS playlists are preferred, but direct video files stay available until encoding completes, so nothing disappears while jobs run.
-- **Rich UI** – favourites, recently added/watched carousels, metadata-driven detail pages (cast, trailers, certifications) and automatic TV → movie rating translation.
-- **Privacy-first** – single-password gate, no third-party telemetry, everything stays on your hardware.
+### Core Functionality
+- **🎬 Automatic HLS Encoding** – FFmpeg worker converts your media to adaptive HLS streams for smooth playback on any device
+- **⚡ Instant Loading** – WebSocket streams content one-by-one for near-instant UI population; first items appear immediately while rest loads in background
+- **📊 Live Updates** – PostgreSQL-backed manifest with real-time synchronization; new content appears automatically without refresh
+- **🎭 Rich Metadata** – TMDb integration for posters, cast, trailers, ratings, and genre information
+- **📝 Automated Subtitles** – OpenAI Whisper generates English subtitles with smart hallucination filtering and browser-native WebVTT rendering
+- **⏯️ Resume Playback** – Pick up exactly where you left off on any device
+- **⭐ Personal Curation** – Favorites, recently watched carousel, and hide functionality
+- **🔍 Advanced Filtering** – Search, genre filters, decade filters, and multiple sort options
+- **📥 Batch Downloads** – Download individual movies or entire TV seasons with one click
+- **🌐 Browser-Native Playback** – HLS.js for cross-browser support with native subtitle controls
+
+### Modern Frontend Architecture
+The React frontend is built with a clean, modular architecture for easy customization:
+- **Organized Components** – Separate components for navbar, video player, cards, modals, and sections
+- **Custom Hooks** – Reusable hooks for authentication, media data, filters, favorites, downloads, and video player logic
+- **Utility Functions** – Dedicated modules for formatting, parsing, and storage operations
+- **27 Files** – Split from a monolithic ~1,100 line file into focused, maintainable modules
+
+### Intelligent Subtitle Generation
+The subtitle service uses OpenAI Whisper with advanced anti-hallucination filtering:
+- **Smart Filtering** – Removes common artifacts like "You", "Thanks for watching", and repetitive patterns
+- **Pattern Detection** – Identifies and removes hallucinations that appear at regular intervals
+- **Duration Analysis** – Filters out segments shorter than 0.5 seconds
+- **Confidence Thresholds** – Uses Whisper's logprob and compression ratio to reject low-quality segments
+- **Sequential Processing** – Movies alphabetically, then TV shows by title → season → episode
+- **WebVTT Conversion** – Automatic conversion from JSON to browser-compatible WebVTT format
 
 ## Architecture
 
 | Component | Description |
 |-----------|-------------|
-| **catflix_backend/** | Express API, manifest synchroniser, metadata backfill, remux/download endpoints, websocket broadcaster. |
-| **catflix_encoding/** | FFmpeg worker that watches the library, produces HLS renditions, and notifies the backend per asset. |
-| **catflix_frontend/** | React SPA served as static assets; now consumes manifest updates over `/ws/manifest` so the UI updates entry-by-entry. |
-| **docker-compose.yml** | Builds/ships both services plus shares media + credentials through `.env`. |
+| **catflix_backend/** | Express API with WebSocket support, manifest synchronization, metadata backfill, subtitle proxy, remux/download endpoints |
+| **catflix_encoding/** | FFmpeg worker that monitors the library, produces HLS renditions, and notifies the backend as each asset completes |
+| **catflix_subtitles/** | Whisper-powered subtitle generator with hallucination filtering, multi-language translation, and WebVTT conversion |
+| **catflix_frontend/** | Modular React SPA with custom hooks, organized components, and real-time manifest updates via WebSocket |
+| **docker-compose.yml** | Complete stack orchestration with shared volumes and environment configuration |
 
-### Data flow
-1. Backend boots, loads the persisted manifest from `media_manifest_entries`, and serves it immediately.
-2. Background scanner diffs the filesystem against the DB table and writes only the rows that changed.
-3. Clients open the websocket, receive the latest snapshot chunk-by-chunk, then stay live as new entries arrive or old ones disappear.
-4. Encoder/notify endpoint can upsert a single movie or show without triggering a full rebuild.
-
-## Feature Tour
-
-- Full-text search, genre + decade filters, and title/release sorting.
-- “Recently Added” and “Continue Watching” carousels fed by the DB timestamps (no filesystem heuristics).
-- Resume points, remembered volume, favourite tagging, and quick download actions (movie or entire season).
-- TMDb integration for posters, cast, trailers, and certification translation (TV ratings mapped to familiar MPAA-style descriptors).
-- Native HLS playback via `<video>` on Safari/iOS and HLS.js fallback elsewhere; subtitle hook ready for future endpoint.
+### Data Flow
+1. **Startup**: Backend loads persisted manifest from `media_manifest_entries` table
+2. **Instant UI**: WebSocket streams items one-by-one in alphabetical order; frontend displays each immediately for fast perceived load
+3. **Background Scanning**: Filesystem scanner diffs against database and updates only changed entries
+4. **Live Updates**: New content appears automatically via WebSocket without page refresh
+5. **Subtitle Generation**: Dedicated service processes media alphabetically, generating filtered subtitles with Whisper
+6. **Subtitle Delivery**: Frontend checks subtitle availability via HEAD request and loads WebVTT format from the backend proxy
 
 ## Requirements
-- Docker Engine (Linux host, WSL2, or a Linux VM)
+- Docker Engine (Linux host, WSL2, or Linux VM)
 - Docker Compose v2
-- PostgreSQL 13+ (local container or existing server)
-- TMDb API key (free account)
-- Media library reachable from the Docker host
+- PostgreSQL 13+ (containerized or external)
+- TMDb API key (free tier sufficient)
+- Media library accessible to Docker host
+- For subtitles: FFmpeg and OpenAI Whisper (auto-installed in container)
 
-## Database Setup
-Catflix expects a PostgreSQL database named `CatFlixDB` (defaults can be changed through `.env`).  
-On startup the backend **creates every required table and index automatically** if they do not already exist, so you only need to provision the database and credentials.
+## Quick Start
 
-### Option 1 – Dockerised Postgres
-Create `postgres-compose.yml` (or add to an existing stack):
+### 1. Database Setup
 
+**Option A – Docker PostgreSQL:**
+```bash
+docker network create catflix-net
+```
+
+Create `postgres-compose.yml`:
 ```yaml
 services:
   catflix-db:
@@ -80,59 +101,64 @@ networks:
     external: true
 ```
 
-Spin it up with:
-
 ```bash
-docker network create catflix-net   # once per host
 docker compose -f postgres-compose.yml up -d
 ```
 
-### Option 2 – Existing PostgreSQL Server
-Log in as an admin user and run:
-
+**Option B – Existing PostgreSQL:**
 ```sql
 CREATE DATABASE "CatFlixDB";
 CREATE USER catflix WITH PASSWORD 'catflix';
 GRANT ALL PRIVILEGES ON DATABASE "CatFlixDB" TO catflix;
 ```
 
-Adjust names if you prefer different credentials; just reflect them in `.env`.  
-The backend will take care of creating the tables (`movies`, `movie_files`, `shows`, `seasons`, `episodes`, `media_manifest_entries`) the first time it connects.
-
-## Environment Configuration
-Duplicate the sample file and edit the values to match your setup:
+### 2. Configuration
 
 ```bash
+git clone https://github.com/SkyeVoyant/Catflix.git
+cd Catflix
 cp .env.example .env
 ```
 
-Important keys:
-- `PASSWORD` – UI login password
-- `TMDB_API_KEY` – TMDb token used for metadata requests
-- `MEDIA_DIR` / `MEDIA_MOUNT_SOURCE` – host path to your media (Windows paths are accepted)
-- `INTERNAL_API_KEY` – shared secret between backend and encoder notifications (keep the same value for both containers)
-- `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` – connection info for PostgreSQL
-- `HLS_*` knobs – advanced FFmpeg/transcoder settings (defaults work well for most setups)
+Edit `.env` with your settings:
+```env
+PASSWORD=your_secure_password
+TMDB_API_KEY=your_tmdb_api_key
+MEDIA_DIR=/path/to/your/media
+PGHOST=localhost
+PGPORT=5434
+PGDATABASE=CatFlixDB
+PGUSER=catflix
+PGPASSWORD=catflix
+WHISPER_MODEL=small  # tiny/base/small/medium/large-v3
+```
 
-### Getting a TMDb API Key
-TMDb offers free API access for personal, non-commercial projects.
+### 3. Get TMDb API Key
+1. Create account at [themoviedb.org](https://www.themoviedb.org/signup)
+2. Visit account settings → **API** tab
+3. Request API key (choose "Developer" option)
+4. Copy **API Key (v3 auth)** into `.env`
 
-1. Create or sign in to an account at [themoviedb.org](https://www.themoviedb.org/signup).
-2. Verify your email address if prompted.
-3. Visit your account settings → **API** tab and request an API key (choose the “Developer” option).
-4. Copy the **API Key (v3 auth)** value into `TMDB_API_KEY` in your `.env` file.
+### 4. Launch Services
 
-## Media Library Layout
-Catflix expects a simple folder structure so it can recognise movies and episodic content and generate the correct HLS manifests:
+```bash
+docker compose up -d --build
+```
+
+Visit `http://localhost:3004` and log in with your password!
+
+## Media Library Structure
+
+Catflix expects this folder organization:
 
 ```
 MEDIA_DIR/
 ├── movies/
 │   ├── Movie Title (Year)/
-│   │   ├── Movie Title (Year).mkv
-│   │   └── ...
-│   └── Another Movie/
-│       └── Another Movie.mp4
+│   │   └── Movie Title (Year).mkv
+│   ├── Another Movie/
+│   │   └── Another Movie.mp4
+│   └── ...
 └── shows/
     ├── Show Title/
     │   ├── Season 01/
@@ -140,84 +166,315 @@ MEDIA_DIR/
     │   │   ├── Show Title - S01E02.mkv
     │   │   └── ...
     │   └── Season 02/
-    │       └── Show Title - S02E01.mkv
-    └── Another Show/
-        └── Season 01/
-            └── Episode 01.mp4
+    │       └── ...
+    └── ...
 ```
 
-- Movies and shows must live under separate top-level folders (`movies/` and `shows/`).
-- Place every movie inside its own subdirectory; the encoder assumes this layout and may fail to process loose files dropped directly under `movies/`.
-- Shows should be split by season; Catflix uses the season folder name and the file name to infer episode numbering.
-- Any existing HLS output (`.m3u8`, `.ts`) inside these directories will be picked up automatically; otherwise the encoder will generate them on demand.
+**Important Notes:**
+- Movies must be in their own subdirectory
+- Shows should be organized by season folders
+- Episode files can use any naming convention (episode numbers are parsed automatically)
+- Existing HLS output (`.m3u8`, `.ts`) will be detected and used
 
-## Manifest Persistence + Live Updates
+## Service Management
 
-| Layer | Purpose |
-|-------|---------|
-| **`media_manifest_entries` table** | Stores every movie/show manifest row (payload JSONB + timestamps). Startup simply `SELECT`s from this table—no full rescan required. |
-| **Scanner** | Still walks the filesystem in the background, but now diffs against the DB and only touches rows that changed (zero cache thrash). |
-| **Websocket (`/ws/manifest`)** | Streams a snapshot on connect, then pushes incremental `upsert`/`delete` events. The frontend applies them immediately, so new episodes surface seconds after encoding finishes. |
-| **Source fallback** | Each episode/movie includes `sourceType` (`hls` or `direct`). Direct files remain playable until the FFmpeg worker produces an HLS master playlist, at which point the manifest automatically flips over. |
+```bash
+# View logs
+docker compose logs -f catflix-app       # Backend
+docker compose logs -f catflix-encoder   # HLS encoder
+docker compose logs -f catflix-subtitles # Subtitle generator
 
-Console log example:  
-`[media-cache] Manifest built: HLS=4427, Backup=2819, Total=5991` – you always know how much is fully HLS-ready vs still using backup sources.
+# Control services
+docker compose stop catflix-encoder      # Pause encoding (save CPU)
+docker compose start catflix-encoder     # Resume encoding
+
+docker compose stop catflix-subtitles    # Pause subtitle generation
+docker compose start catflix-subtitles   # Resume subtitle generation
+
+docker compose restart catflix-app       # Restart backend
+```
+
+## Subtitle System
+
+### How It Works
+The subtitle service automatically processes all HLS-encoded content:
+
+1. **Extraction**: Extracts audio from HLS `.ts` segments
+2. **Transcription**: Uses OpenAI Whisper to generate timestamped text
+3. **Filtering**: Removes hallucinations, repetitions, and artifacts
+4. **Translation**: Translates non-English audio to English (via Argos Translate)
+5. **Storage**: Saves as JSON with metadata (easily editable)
+6. **Delivery**: Frontend requests WebVTT format via backend proxy
+
+### Processing Order
+- **Movies**: Alphabetical by title
+- **TV Shows**: By show title, then season number, then episode number
+- All episodes of a season complete before moving to next show
+
+### Anti-Hallucination Features
+The service applies multiple filters to ensure clean subtitles:
+
+**Whisper Parameters:**
+- `--condition_on_previous_text False` – Prevents repetitive hallucinations
+- `--logprob_threshold -1.0` – Filters low-confidence segments
+- `--compression_ratio_threshold 2.4` – Rejects repetitive patterns
+- `--initial_prompt` – Guides Whisper toward clean dialogue transcription
+
+**Post-Processing Filters:**
+- Pattern matching for common artifacts ("You", "Thanks for watching", etc.)
+- Duration filtering (removes segments < 0.5 seconds)
+- Repetition detection (identifies patterns at regular intervals)
+- Confidence analysis (removes punctuation-only segments)
+
+### Configuration
+Adjust in `.env` or `docker-compose.yml`:
+
+```env
+WHISPER_MODEL=small           # tiny/base/small/medium/large-v3
+                              # Larger = more accurate but slower
+                              # small is recommended (good balance)
+
+SUBTITLES_DIR=/app/subtitles  # Storage location (in container)
+```
+
+**Model Comparison:**
+- `tiny`: Fastest, lowest accuracy (~1 GB RAM, ~5-10 min/hour)
+- `base`: Fast, decent accuracy (~1 GB RAM, ~10-15 min/hour)
+- `small`: **Recommended** – Good accuracy (~2 GB RAM, ~15-30 min/hour)
+- `medium`: Better accuracy (~5 GB RAM, ~30-60 min/hour)
+- `large-v3`: Best accuracy (~10 GB RAM, ~60-120 min/hour)
+
+### Storage Structure
+```
+subtitles/
+├── movies/
+│   ├── Movie Title.json
+│   └── ...
+└── shows/
+    ├── Show Title/
+    │   ├── season 1/
+    │   │   ├── Episode 1.json
+    │   │   └── ...
+    │   └── season 2/
+    │       └── ...
+    └── ...
+```
+
+Each JSON file contains:
+```json
+{
+  "metadata": {
+    "language": "en",
+    "originalLanguage": "en",
+    "model": "small",
+    "generatedAt": "2025-11-19T10:00:00.000Z",
+    "filtered": 15
+  },
+  "subtitles": [
+    {
+      "id": 1,
+      "start": 12.5,
+      "end": 15.8,
+      "text": "This is the dialogue text"
+    },
+    ...
+  ]
+}
+```
+
+### Manual Subtitle Editing
+Subtitle JSON files can be edited directly:
+1. Navigate to `catflix_subtitles/subtitles/`
+2. Edit the JSON file with any text editor
+3. Changes take effect immediately (no restart needed)
+4. Frontend will fetch updated WebVTT next time video loads
 
 ## Age Rating Translation
 
-The frontend automatically translates TV ratings to standardized movie ratings for clarity:
+For consistency, TV ratings are automatically converted to movie-style ratings:
 
-| TV Rating | Displayed As | Meaning |
-|-----------|--------------|---------|
-| TV-Y, TV-Y7, TV-G | **G (General Audiences)** | All ages appropriate |
+| TV Rating | Displayed As | Description |
+|-----------|--------------|-------------|
+| TV-Y, TV-Y7, TV-G | **G (General Audiences)** | All ages admitted |
 | TV-PG | **PG (Parental Guidance Suggested)** | Some material may not be suitable for children |
 | TV-14 | **PG-13 (Parents Strongly Cautioned)** | Some material may be inappropriate for children under 13 |
 | TV-MA | **R (Restricted)** | Under 17 requires accompanying parent or adult guardian |
 
-Movie ratings (G, PG, PG-13, R, NC-17) are displayed with their full descriptions as well. This provides consistent, easy-to-understand age ratings across all content.
+Movie ratings (G, PG, PG-13, R, NC-17) display with full MPAA descriptions.
 
-## Quick Start (Docker Compose)
-```bash
-git clone https://github.com/SkyeVoyant/Catflix.git
-cd Catflix
+## Frontend Architecture
 
-cp .env.example .env                      # fill in PASSWORD, TMDB_API_KEY, MEDIA paths, DB creds
-docker network create catflix-net        # once per host
-# start Postgres (either reuse /root/databases/catflix or run your own)
-docker compose up -d --build             # builds frontend+backend+encoder
+The React frontend is built with a clean, modular structure for easy customization and contributions:
+
 ```
-Visit `http://localhost:3004`, log in with the password from `.env`, and watch the library populate instantly from the DB snapshot while the background scanner/encoder keeps refining entries.
+src/
+├── App.js (292 lines - orchestration layer)
+├── constants.js (global constants)
+├── utils/
+│   ├── formatters.js (time & episode formatting)
+│   ├── parsers.js (URL & key parsing)
+│   └── storage.js (localStorage helpers)
+├── hooks/
+│   ├── useAuth.js (authentication)
+│   ├── useMediaData.js (fetch movies/shows/metadata)
+│   ├── useRecentWatched.js (recent watch tracking)
+│   ├── useFavorites.js (favorites management)
+│   ├── useDownloads.js (movie/season downloads)
+│   ├── useFilters.js (filtering & sorting logic)
+│   └── useVideoPlayer.js (HLS player, resume, events)
+└── components/
+    ├── layout/
+    │   ├── Navbar.jsx
+    │   └── FilterBar.jsx
+    ├── video/
+    │   ├── VideoPlayer.jsx
+    │   └── NextEpisodeOverlay.jsx
+    ├── cards/
+    │   ├── MediaCard.jsx
+    │   └── RecentCard.jsx
+    ├── modals/
+    │   └── DetailModal.jsx
+    └── sections/
+        ├── RecentlyWatchedSection.jsx
+        ├── FavoritesSection.jsx
+        ├── RecentlyAddedSection.jsx
+        └── AllResultsSection.jsx
+```
 
-- Pause encoding to save CPU: `docker compose stop catflix-encoder`
-- Resume later: `docker compose start catflix-encoder`
-- Tail logs  
-  - Backend: `docker compose logs -f catflix-app`  
-  - Encoder: `docker compose logs -f catflix-encoder`
-- Force a manual rebuild (if needed): `docker exec CatFlixApp node -e "require('./src/services/mediaCache').refreshMediaCache('manual')"`
-- Back up the DB: snapshot the Postgres volume or run `pg_dump` with the credentials from `.env`.
+**Benefits:**
+- Easy to find and modify specific features
+- Reusable hooks across components
+- Clear separation of concerns
+- Simple to add new features or customize UI
+- Perfect for open-source contributions
+
+## API Endpoints
+
+### Backend (Port 3004)
+- `POST /auth/login` – Authenticate with password
+- `POST /auth/logout` – Clear session
+- `GET /api/media` – Get full media manifest
+- `GET /api/metadata` – Fetch TMDb metadata for a title
+- `GET /api/subtitles` – Proxy to subtitle service (returns WebVTT)
+- `GET /ws/manifest` – WebSocket for live manifest updates
+- `POST /api/downloads/movies/:id/prepare` – Prepare movie download
+- `GET /api/downloads/movies/:id/file` – Download movie file
+- `POST /api/downloads/episodes/:id/prepare` – Prepare episode download
+- `GET /api/downloads/episodes/:id/file` – Download episode file
+
+### Subtitle Service (Port 3006)
+- `GET /api/subtitles/movie/:entryId` – Get movie subtitle (JSON)
+- `GET /api/subtitles/episode/:entryId` – Get episode subtitle (JSON)
+- `GET /api/subtitles/movie/:entryId/vtt` – Get movie subtitle (WebVTT)
+- `GET /api/subtitles/episode/:entryId/vtt` – Get episode subtitle (WebVTT)
+- `GET /api/subtitles/status/movie/:entryId` – Check availability
+- `GET /api/subtitles/status/episode/:entryId` – Check availability
+- `GET /health` – Service health check
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| Empty UI after login | Verify the DB is reachable (`docker logs CatFlixApp`) and `media_manifest_entries` has rows (run `SELECT count(*)` in Postgres). |
-| Metadata missing | Double-check `TMDB_API_KEY` and inspect backend logs for TMDb errors/rate limits. |
-| Media path problems | Confirm `MEDIA_DIR`, `MEDIA_DIR_OUT`, and `MEDIA_MOUNT_SOURCE` are aligned (Windows path ↔️ WSL mount ↔️ Docker volume). |
-| Encoder hammering CPU | Lower `HLS_MAX_CONCURRENCY` in `.env` or temporarily stop the encoder container. |
+| Issue | Solution |
+|-------|----------|
+| Empty UI after login | Check database connection in logs (`docker logs CatFlixApp`). Verify `media_manifest_entries` table has rows. |
+| No metadata/posters | Verify `TMDB_API_KEY` is correct. Check backend logs for API errors or rate limits. |
+| Media not found | Confirm `MEDIA_DIR` paths are correct and accessible from Docker containers. Check volume mounts in `docker-compose.yml`. |
+| High CPU usage | Lower `HLS_MAX_CONCURRENCY` in `.env` or stop encoder: `docker compose stop catflix-encoder` |
+| Subtitles not appearing | Check subtitle service logs: `docker logs CatFlixSubtitles`. Verify Whisper is installed and `WHISPER_MODEL` is valid. |
+| Subtitles have errors | Try regenerating with different Whisper model, or manually edit JSON files in `subtitles/` directory. |
+| Slow subtitle generation | Use smaller Whisper model (`tiny` or `base`) or allocate more CPU/RAM to container. |
+| Database connection failed | Verify PostgreSQL is running and credentials in `.env` match database configuration. |
+
+## Developing Without Docker
+
+### Backend & Encoder
+```bash
+cd catflix_backend
+pnpm install
+pnpm start  # Backend
+
+# In separate terminal
+cd catflix_encoding
+node index.js  # Encoder
+```
+
+### Subtitle Service
+```bash
+cd catflix_subtitles
+pnpm install
+
+# Install Whisper
+pip install openai-whisper
+
+# Install Argos Translate
+pip install argostranslate
+# Download English translation model (run in Python):
+# import argostranslate.package
+# argostranslate.package.update_package_index()
+# available = argostranslate.package.get_available_packages()
+# to_en = list(filter(lambda x: x.to_code == 'en', available))
+# for pkg in to_en: argostranslate.package.install_from_path(pkg.download())
+
+node src/index.js  # Start service
+```
+
+### Frontend
+```bash
+cd catflix_frontend
+pnpm install
+pnpm start  # Dev server on http://localhost:3000
+```
+
+Ensure PostgreSQL is running and `.env` is configured. All services will perform automatic schema creation on first launch.
+
+## Performance Tips
+
+### Encoding Performance
+- Set `HLS_MAX_CONCURRENCY` based on CPU cores (default: 2)
+- Use hardware encoding if available (configure FFmpeg flags in encoder)
+- Process library in batches by temporarily moving files
+
+### Subtitle Performance
+- Use `small` model for best speed/accuracy balance
+- Monitor RAM usage (Whisper loads entire model into memory)
+- Pause subtitle generation during peak usage times
+
+### Database Performance
+- Regularly vacuum PostgreSQL: `VACUUM ANALYZE;`
+- Create indexes on frequently queried fields
+- Consider dedicated PostgreSQL server for large libraries (1000+ items)
+
+## Backup & Recovery
+
+### Database Backup
+```bash
+# Dump database
+docker exec CatFlixDB pg_dump -U catflix CatFlixDB > catflix_backup.sql
+
+# Restore database
+docker exec -i CatFlixDB psql -U catflix CatFlixDB < catflix_backup.sql
+```
+
+### Subtitle Backup
+Subtitles are stored as JSON files in `catflix_subtitles/subtitles/`. Simply backup this directory:
+```bash
+tar -czf subtitles_backup.tar.gz catflix_subtitles/subtitles/
+```
+
+## Contributing
+
+Catflix is designed for easy customization and contributions:
+
+1. **Frontend**: Modular React components make it easy to add features or change UI
+2. **Backend**: Clean Express routes with separated business logic
+3. **Subtitles**: Pluggable architecture allows custom filters or alternative transcription engines
+4. **Encoder**: FFmpeg pipeline can be extended with custom presets
+
+Feel free to open issues or pull requests!
+
+## License
+
+GPL-2.0-only
 
 ---
 
-Catflix is built for personal media servers: fast startup, resilient manifests, low-maintenance Docker workflow, and a UI that keeps pace with your library in real time.
-- **Encoder idle** – check `catflix-encoder` logs; the worker reports when media paths are missing or jobs are already processed.
-
-## Developing Without Docker
-- Install dependencies:  
-  `pnpm install` in `catflix_backend/` (also installs shared deps for `catflix_encoding/`), `pnpm install` in `catflix_frontend/`
-- Start services:
-  - Backend: `pnpm start` inside `catflix_backend/`
-  - Encoder: `node ../catflix_encoding/index.js`
-  - Frontend (dev server): `pnpm start` inside `catflix_frontend/`
-- Ensure PostgreSQL and the `.env` file are available; the backend will still perform schema creation on launch.
-
-## License
-GPL-2.0-only
+**Catflix** – Your personal streaming platform with automated subtitles, smart encoding, and a beautiful interface. All running on your hardware, with your rules.
