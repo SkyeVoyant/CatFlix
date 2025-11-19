@@ -1,0 +1,6 @@
+node_modules/
+subtitles/
+temp/
+.env
+*.log
+

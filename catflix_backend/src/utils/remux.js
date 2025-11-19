@@ -115,17 +115,26 @@ async function cleanupExpiredSessions() {
 
 function runFfmpegRemux(inputPath, outputPath, titleForLogs = 'remux') {
   return new Promise((resolve, reject) => {
+    // Change working directory to playlist's directory so relative segment paths resolve correctly
+    const playlistDir = path.dirname(inputPath);
+    const playlistFile = path.basename(inputPath);
+    // Use absolute path for output (it's in a different directory)
+    const outputAbsolute = path.isAbsolute(outputPath) ? outputPath : path.resolve(outputPath);
+    
     const args = [
       '-hide_banner',
       '-loglevel', 'error',
       '-y',
-      '-i', inputPath,
+      '-i', playlistFile,  // Use relative path since we're in the playlist directory
       '-c', 'copy',
       '-movflags', 'faststart',
       '-f', 'mp4',
-      outputPath
+      outputAbsolute
     ];
-    const child = spawn(config.FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(config.FFMPEG_PATH, args, { 
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: playlistDir
+    });
     let stderrBuf = '';
     child.stderr.on('data', (chunk) => {
       stderrBuf += chunk.toString();
@@ -173,47 +182,34 @@ async function ensureRemuxedFile({ type, descriptor, sourceRelative, hlsRelative
   const { pathExists } = require('./fs');
   const MEDIA_DIR = config.MEDIA_DIR;
 
-  // Check if this is a direct video file (no remux needed)
-  const isDirectVideo = sourceType === 'direct' || (!hlsRelative?.endsWith('.m3u8') && sourceRelative && !sourceRelative.endsWith('.m3u8'));
+  // Focus on HLS only - use hls_path from DB directly if it's a .m3u8 file
+  // Otherwise compute the expected path
+  let masterRelative = null;
   
-  if (isDirectVideo && sourceRelative) {
-    // Direct video file - just prepare to stream the original file
-    const sourceAbsolute = path.join(MEDIA_DIR, fromPosix(sourceRelative));
-    if (!(await pathExists(sourceAbsolute))) {
-      throw new Error('Direct video file missing on disk');
-    }
-    
-    // Determine the file extension and use appropriate filename
-    const ext = path.extname(sourceRelative);
-    const filename = `${sanitizeFilename(descriptor)}${ext}`;
-    
-    // For direct video, we don't need caching - return the source file directly
-    return { 
-      filePath: sourceAbsolute, 
-      filename, 
-      sessionId: null,
-      isDirect: true 
-    };
+  if (hlsRelative && hlsRelative.endsWith('.m3u8')) {
+    // hls_path from DB is already the master playlist path
+    masterRelative = hlsRelative;
+  } else {
+    // Compute HLS layout to find the master playlist
+    const { computeHlsLayout } = require('./hls');
+    const layout = computeHlsLayout({
+      type,
+      sourceRelativePath: sourceRelative ? toPosix(sourceRelative) : null,
+      hlsRelativePath: hlsRelative ? toPosix(hlsRelative) : null,
+      hlsMasterTemplate: config.HLS_MASTER_PLAYLIST_NAME,
+      hlsVariantTemplate: config.HLS_VARIANT_PLAYLIST_TEMPLATE,
+      hlsSegmentTemplate: config.HLS_SEGMENT_TEMPLATE
+    });
+    masterRelative = layout.masterRelative;
   }
-
-  // HLS remux path (original logic)
-  const { computeHlsLayout } = require('./hls');
   
-  const layout = computeHlsLayout({
-    type,
-    sourceRelativePath: sourceRelative ? toPosix(sourceRelative) : null,
-    hlsRelativePath: hlsRelative ? toPosix(hlsRelative) : null,
-    hlsMasterTemplate: config.HLS_MASTER_PLAYLIST_NAME,
-    hlsVariantTemplate: config.HLS_VARIANT_PLAYLIST_TEMPLATE,
-    hlsSegmentTemplate: config.HLS_SEGMENT_TEMPLATE
-  });
-  const masterRelative = layout.masterRelative;
   if (!masterRelative) {
-    throw new Error('No HLS master playlist available');
+    throw new Error('No HLS master playlist path available');
   }
+  
   const masterAbsolute = path.join(MEDIA_DIR, fromPosix(masterRelative));
   if (!(await pathExists(masterAbsolute))) {
-    throw new Error('HLS playlist missing on disk');
+    throw new Error(`HLS playlist missing on disk: ${masterRelative}`);
   }
 
   await ensureCacheDir();
@@ -267,11 +263,6 @@ async function streamRemuxResult(res, remuxInfo, { deleteAfter = false } = {}) {
   try {
     await streamFileAsDownload(res, remuxInfo.filePath, { filename: remuxInfo.filename });
   } finally {
-    // Direct video files don't need cleanup (they're not cached)
-    if (remuxInfo.isDirect) {
-      return;
-    }
-    
     if (deleteAfter) {
       await removeFileQuietly(remuxInfo.filePath);
       dropRemuxSession(remuxInfo.sessionId);

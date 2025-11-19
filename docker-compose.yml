@@ -2,7 +2,7 @@ services:
   catflix-app:
     build: .
     container_name: CatFlixApp
-    image: catflix-app:sl.eepy.me
+    image: catflix-app:latest
     ports:
       - "3004:3004"
     env_file:
@@ -26,7 +26,7 @@ services:
   catflix-encoder:
     build: .
     container_name: CatFlixEncoder
-    image: catflix-encoder:sl.eepy.me
+    image: catflix-encoder:latest
     env_file:
       - .env
     environment:
@@ -42,6 +42,31 @@ services:
     volumes:
       - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
     command: ["node", "../catflix_encoding/index.js"]
+    restart: unless-stopped
+    networks:
+      - catflix-net
+
+  catflix-subtitles:
+    build: ./catflix_subtitles
+    container_name: CatFlixSubtitles
+    image: catflix-subtitles:latest
+    env_file:
+      - .env
+    environment:
+      - PORT=3006
+      - PGHOST=catflix-db
+      - PGPORT=5432
+      - PGUSER=catflix
+      - PGPASSWORD=catflix
+      - PGDATABASE=CatFlixDB
+      - MEDIA_DIR_CONTAINER=/media
+      - MEDIA_DIR=${MEDIA_MOUNT_SOURCE:-/media}
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+    volumes:
+      - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
+      - "./catflix_subtitles/subtitles:/app/subtitles"
+    ports:
+      - "3006:3006"
     restart: unless-stopped
     networks:
       - catflix-net

@@ -68,6 +68,8 @@
   cursor: pointer;
   transition: transform 0.2s, filter 0.2s;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .card:hover {
@@ -248,23 +250,6 @@
   aspect-ratio: 16 / 9;
   border: 0;
 }
-.cast-section {
-  margin-top: 16px;
-}
-.cast-section ul {
-  list-style: none;
-  padding: 0;
-  margin: 8px 0 0;
-}
-.cast-section li {
-  margin: 2px 0;
-  color: #bbb;
-  font-size: 14px;
-}
-.cast-section strong {
-  color: #f0f0f0;
-  font-weight: 600;
-}
 .play-button {
   background: #e50914;
   color: #fff;
@@ -412,6 +397,25 @@
 }
 .recent-card:hover .hide-btn {
   display: flex;
+}
+
+.resume-btn {
+  width: 90%;
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin: auto auto 8px;
+  display: block;
+  transition: background 0.3s ease;
+}
+
+.resume-btn:hover {
+  background: #e50914;
 }
 
 /* Video Modal Above Detail Modal */

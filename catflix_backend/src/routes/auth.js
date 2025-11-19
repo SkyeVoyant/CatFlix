@@ -13,8 +13,25 @@ function renderLogin(errorMessage = '') {
           body { background: #141414; color: #fff; margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif; }
           .login-box { background: #000; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.7); width: 100%; max-width: 360px; text-align: center; }
           .login-box h1 { color: #e50914; margin-bottom: 20px; }
-          .login-box input { width: 100%; padding: 12px; margin-bottom: 20px; border: none; border-radius: 4px; background: #333; color: #fff; }
-          .login-box button { width: 100%; padding: 12px; border: none; border-radius: 4px; background: #e50914; color: #fff; font-size: 16px; cursor: pointer; }
+        .login-box input,
+        .login-box button {
+          width: 100%;
+          padding: 12px;
+          box-sizing: border-box;
+          border: none;
+          border-radius: 4px;
+        }
+        .login-box input {
+          margin-bottom: 20px;
+          background: #333;
+          color: #fff;
+        }
+        .login-box button {
+          background: #e50914;
+          color: #fff;
+          font-size: 16px;
+          cursor: pointer;
+        }
           .error { color: #e87c03; margin-bottom: 16px; }
         </style>
       </head>
