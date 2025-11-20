@@ -60,6 +60,9 @@ app.use('/api', mediaRoutes);
 app.use('/api/downloads', downloadRoutes);
 app.use('/api/subtitles', subtitleRoutes);
 
+// Live remux service for Samsung Browser and Apple devices
+const liveRemux = require('./services/liveRemux');
+
 app.use('/videos', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -71,11 +74,92 @@ app.use('/videos', (req, res, next) => {
   
   if (req.path.toLowerCase().endsWith('.m3u8')) {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   } else if (req.path.toLowerCase().endsWith('.ts')) {
     res.setHeader('Content-Type', 'video/mp2t');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (req.path.toLowerCase().endsWith('.m4s') || req.path.toLowerCase().endsWith('.mp4')) {
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   }
   
   next();
+});
+
+// Live remux middleware - intercepts requests with remux=fmp4 parameter
+app.use('/videos', async (req, res, next) => {
+  const needsRemux = req.query.remux === 'fmp4';
+  
+  if (!needsRemux) {
+    return next();
+  }
+  
+  const path = require('path');
+  const fs = require('fs').promises;
+  const filePath = path.join(config.MEDIA_DIR, req.path);
+  
+  try {
+    // Handle .m3u8 playlist requests
+    if (req.path.toLowerCase().endsWith('.m3u8')) {
+      const originalContent = await fs.readFile(filePath, 'utf8');
+      const convertedPlaylist = await liveRemux.convertPlaylist(filePath, originalContent);
+      
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.send(convertedPlaylist);
+    }
+    
+    // Handle init segment requests (generated from first .ts segment)
+    if (req.path.toLowerCase().endsWith('_init.mp4')) {
+      // Find the first .ts segment in the same directory
+      const dirPath = path.dirname(filePath);
+      const baseName = path.basename(req.path, '_init.mp4');
+      const files = await fs.readdir(dirPath);
+      
+      // Find first segment (usually ends with _00000.ts or similar)
+      const firstSegment = files
+        .filter(f => f.startsWith(baseName) && f.endsWith('.ts'))
+        .sort()[0];
+      
+      if (!firstSegment) {
+        return res.status(404).send('Init segment source not found');
+      }
+      
+      const firstSegmentPath = path.join(dirPath, firstSegment);
+      const initSegment = await liveRemux.generateInitSegment(firstSegmentPath);
+      
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.send(initSegment);
+    }
+    
+    // Handle .m4s segment requests (remux from .ts on-the-fly)
+    if (req.path.toLowerCase().endsWith('.m4s')) {
+      // Convert .m4s path back to .ts path
+      const tsPath = filePath.replace(/\.m4s$/i, '.ts');
+      
+      // Check if .ts file exists
+      try {
+        await fs.access(tsPath);
+      } catch {
+        return res.status(404).send('Source segment not found');
+      }
+      
+      const remuxedSegment = await liveRemux.remuxSegment(tsPath);
+      
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.send(remuxedSegment);
+    }
+    
+    // For other files, pass through
+    next();
+  } catch (err) {
+    console.error('[liveRemux] Error:', err);
+    return res.status(500).send('Remux error');
+  }
 });
 
 app.use('/videos', express.static(config.MEDIA_DIR));
