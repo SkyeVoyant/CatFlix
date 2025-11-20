@@ -161,7 +161,7 @@ async function processEpisode(episodeData) {
 }
 
 /**
- * Main processing loop - processes one item at a time
+ * Main processing loop - processes one item at a time in alphabetical order
  */
 async function processNext() {
   if (isProcessing || shouldStop) {
@@ -171,22 +171,15 @@ async function processNext() {
   isProcessing = true;
   
   try {
-    // Try to find a movie without subtitles first
-    let movie = await db.findMovieWithoutSubtitles();
+    // Find next item (movie or episode) in alphabetical order
+    let item = await db.findNextItemWithoutSubtitles();
     
-    if (movie) {
-      await processMovie(movie);
-      isProcessing = false;
-      // Continue processing
-      setTimeout(processNext, 1000);
-      return;
-    }
-    
-    // If no movie, try to find an episode
-    let episode = await db.findEpisodeWithoutSubtitles();
-    
-    if (episode) {
-      await processEpisode(episode);
+    if (item) {
+      if (item.type === 'movie') {
+        await processMovie(item);
+      } else {
+        await processEpisode(item);
+      }
       isProcessing = false;
       // Continue processing
       setTimeout(processNext, 1000);

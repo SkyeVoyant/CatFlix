@@ -20,21 +20,45 @@ async function transcribeAudio(audioPath) {
   try {
     // Whisper command with anti-hallucination settings:
     // --condition_on_previous_text False: Prevents repetitive hallucinations
-    // --initial_prompt: Discourages filler words
     // --no_speech_threshold 0.6: Higher threshold to ignore silence (default is 0.6, we use 0.6)
     // --logprob_threshold -1.0: Filters out low-confidence segments
     // --compression_ratio_threshold 2.4: Rejects repetitive text
-    const initialPrompt = "This is a movie dialogue with clear speech. Avoid filler words.";
-    const command = `whisper "${audioPath}" --model ${model} --output_format json --output_dir "${outputDir}" --task transcribe --temperature 0.0 --beam_size 5 --best_of 5 --condition_on_previous_text False --initial_prompt "${initialPrompt}" --no_speech_threshold 0.6 --logprob_threshold -1.0 --compression_ratio_threshold 2.4`;
+    // --fp16 False: Use FP32 instead of FP16 (required for CPU-only systems)
+    // --beam_size 5: Standard beam search for quality
+    // Note: initial_prompt removed to prevent prompt text from leaking into transcription
+    const command = `whisper "${audioPath}" --model ${model} --output_format json --output_dir "${outputDir}" --task transcribe --temperature 0.0 --beam_size 5 --condition_on_previous_text False --no_speech_threshold 0.6 --logprob_threshold -1.0 --compression_ratio_threshold 2.4 --fp16 False`;
     
     console.log(`[transcriber] Running: ${command}`);
     console.log(`[transcriber] Anti-hallucination settings enabled`);
     console.log(`[transcriber] This may take ~15-30 minutes for a 2-hour movie with the small model...`);
     
-    const { stdout, stderr } = await execAsync(command, {
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large outputs
-      timeout: 3600000 // 1 hour timeout (transcription can take a while)
-    });
+    let stdout, stderr;
+    try {
+      const result = await execAsync(command, {
+        maxBuffer: 100 * 1024 * 1024, // 100MB buffer - whisper outputs a lot to stderr
+        timeout: 7200000, // 2 hour timeout for long movies
+        killSignal: 'SIGTERM'
+      });
+      stdout = result.stdout;
+      stderr = result.stderr;
+    } catch (execError) {
+      // Command failed - log the actual error details
+      console.error(`[transcriber] Whisper command failed with exit code:`, execError.code);
+      console.error(`[transcriber] Signal:`, execError.signal);
+      console.error(`[transcriber] Killed:`, execError.killed);
+      console.error(`[transcriber] Error message:`, execError.message);
+      if (execError.stdout) {
+        console.error(`[transcriber] stdout (first 1000 chars):`, execError.stdout.substring(0, 1000));
+      }
+      if (execError.stderr) {
+        console.error(`[transcriber] stderr (first 1000 chars):`, execError.stderr.substring(0, 1000));
+      }
+      // If killed by timeout or buffer, give more specific error
+      if (execError.killed) {
+        throw new Error(`Whisper process was killed (likely timeout or buffer overflow)`);
+      }
+      throw new Error(`Whisper command failed: ${execError.stderr || execError.message}`);
+    }
     
     if (stdout) {
       // Whisper verbose output shows progress - log it
@@ -48,10 +72,7 @@ async function transcribeAudio(audioPath) {
     
     if (stderr) {
       // Whisper often outputs progress to stderr too
-      const stderrLines = stderr.split('\n').filter(line => line.trim());
-      if (stderrLines.length > 0 && !stderrLines[0].includes('CUDA') && !stderrLines[0].includes('warning')) {
-        console.log(`[transcriber] Whisper output:`, stderrLines.slice(0, 5).join(' | '));
-      }
+      console.log(`[transcriber] Whisper stderr output:`, stderr.substring(0, 500));
     }
     
     // Whisper outputs JSON file with same name as input (without extension) + .json
@@ -98,8 +119,10 @@ function filterHallucinations(segments) {
     /^\.+$/,  // Just dots
     /^,+$/,   // Just commas
     // Filter out the initial prompt text that sometimes leaks into results
-    /this is a movie dialogue with clear speech/i,
-    /avoid filler words/i,
+    /this is a movie dialogue/i,
+    /clear speech/i,
+    /avoid filler/i,
+    /^this is a movie dialogue with clear speech\.?\s*avoid filler words\.?$/i,
   ];
 
   const filtered = [];

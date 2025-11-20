@@ -55,6 +55,64 @@ const FIND_EPISODE_SQL = `
   LIMIT 1;
 `;
 
+// Combined query to get next item (movie or episode) in alphabetical order
+const FIND_NEXT_ITEM_SQL = `
+  WITH movies AS (
+    SELECT 
+      'movie' AS entity_type,
+      mme.id AS manifest_id,
+      mme.title AS manifest_title,
+      NULL AS show_title,
+      NULL AS season_label,
+      (part->>'id')::BIGINT AS entry_id,
+      COALESCE(NULLIF(part->>'title', ''), mme.title) AS item_title,
+      part->>'relative' AS relative_path,
+      (part->>'addedAt')::BIGINT AS added_at,
+      LOWER(mme.title) AS sort_key
+    FROM media_manifest_entries mme
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mme.payload->'parts', '[]'::jsonb)) part
+    LEFT JOIN subtitles s 
+      ON s.entity_type = 'movie' 
+     AND s.relative_path = part->>'relative'
+    WHERE mme.entity_type = 'movie'
+      AND (part->>'id') IS NOT NULL
+      AND COALESCE(part->>'sourceType', '') ILIKE 'hls'
+      AND COALESCE(part->>'relative', '') <> ''
+      AND s.id IS NULL
+  ),
+  episodes AS (
+    SELECT 
+      'episode' AS entity_type,
+      mme.id AS manifest_id,
+      mme.title AS manifest_title,
+      mme.title AS show_title,
+      season->>'season' AS season_label,
+      (episode->>'id')::BIGINT AS entry_id,
+      COALESCE(NULLIF(episode->>'title', ''), 'Episode') AS item_title,
+      episode->>'relative' AS relative_path,
+      (episode->>'addedAt')::BIGINT AS added_at,
+      LOWER(mme.title || ' ' || COALESCE(season->>'season', 'Season 1') || ' ' || COALESCE(episode->>'title', 'Episode')) AS sort_key
+    FROM media_manifest_entries mme
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mme.payload->'seasons', '[]'::jsonb)) season
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(season->'episodes', '[]'::jsonb)) episode
+    LEFT JOIN subtitles s 
+      ON s.entity_type = 'episode' 
+     AND s.relative_path = episode->>'relative'
+    WHERE mme.entity_type = 'show'
+      AND (episode->>'id') IS NOT NULL
+      AND COALESCE(episode->>'sourceType', '') ILIKE 'hls'
+      AND COALESCE(episode->>'relative', '') <> ''
+      AND s.id IS NULL
+  )
+  SELECT * FROM (
+    SELECT * FROM movies
+    UNION ALL
+    SELECT * FROM episodes
+  ) combined
+  ORDER BY sort_key ASC
+  LIMIT 1;
+`;
+
 async function ensureSchema() {
   const client = await pool.connect();
   try {
@@ -161,11 +219,42 @@ async function getSubtitleRecordByPath(entityType, relativePath) {
   return result.rows[0] || null;
 }
 
+async function findNextItemWithoutSubtitles() {
+  const result = await pool.query(FIND_NEXT_ITEM_SQL);
+  const row = result.rows[0];
+  if (!row) return null;
+  
+  // Transform to match the format expected by processor
+  if (row.entity_type === 'movie') {
+    return {
+      type: 'movie',
+      manifest_id: row.manifest_id,
+      manifest_title: row.manifest_title,
+      entry_id: row.entry_id,
+      part_title: row.item_title,
+      relative_path: row.relative_path,
+      added_at: row.added_at
+    };
+  } else {
+    return {
+      type: 'episode',
+      manifest_id: row.manifest_id,
+      show_title: row.show_title,
+      season_label: row.season_label,
+      entry_id: row.entry_id,
+      episode_title: row.item_title,
+      relative_path: row.relative_path,
+      added_at: row.added_at
+    };
+  }
+}
+
 module.exports = {
   pool,
   ensureSchema,
   findMovieWithoutSubtitles,
   findEpisodeWithoutSubtitles,
+  findNextItemWithoutSubtitles,
   recordSubtitle,
   getSubtitleRecord,
   getSubtitleRecordByPath
