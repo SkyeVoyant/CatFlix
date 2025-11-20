@@ -6,10 +6,9 @@ export function VideoPlayer({ videoRef, subtitleUrl }) {
       ref={videoRef}
       className="video-player"
       controls
-      autoPlay
       playsInline
-      webkit-playsinline="true"
       preload="auto"
+      crossOrigin="anonymous"
     >
       {subtitleUrl && (
         <track

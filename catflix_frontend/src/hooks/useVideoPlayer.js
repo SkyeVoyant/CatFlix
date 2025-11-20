@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import Hls from 'hls.js';
+import { needsFMP4Remux } from '../utils/deviceDetection';
 
 export function useVideoPlayer(selectedVideo, { onProgress, shows, nextUp, hiddenRecents, unhideRecentByKey }) {
   const videoRef = useRef(null);
@@ -19,32 +20,112 @@ export function useVideoPlayer(selectedVideo, { onProgress, shows, nextUp, hidde
       videoEl.load();
       return;
     }
-    const src = selectedVideo.src;
+    let src = selectedVideo.src;
     const isHls = /\.m3u8(\?|$)/i.test(src);
+    
+    // For Samsung Browser and Apple devices, use live remux endpoint
+    if (isHls && needsFMP4Remux()) {
+      // Add remux parameter to trigger backend live remux
+      src = src.includes('?') ? `${src}&remux=fmp4` : `${src}?remux=fmp4`;
+    }
+    
+    // Clean up existing HLS instance
     if (hlsInstanceRef.current) {
       try { hlsInstanceRef.current.destroy(); } catch {}
       hlsInstanceRef.current = null;
     }
-    if (isHls && !videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true });
+    
+    if (isHls) {
+      // Check for native HLS support (Safari, iOS)
+      const canPlayNatively = videoEl.canPlayType('application/vnd.apple.mpegurl') !== '';
+      
+      if (canPlayNatively) {
+        // Use native HLS playback (iOS Safari, macOS Safari)
+        console.log('[HLS] Using native HLS playback');
+        videoEl.src = src;
+        videoEl.load();
+      } else if (Hls.isSupported()) {
+        // Use hls.js for browsers without native support but with MSE
+        console.log('[HLS] Using hls.js for playback');
+        const hls = new Hls({
+          enableWorker: false,
+          debug: false,
+          lowLatencyMode: false,
+          backBufferLength: 90,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 600,
+          maxBufferSize: 60 * 1000 * 1000,
+          maxBufferHole: 0.5,
+          highBufferWatchdogPeriod: 2,
+          nudgeOffset: 0.1,
+          nudgeMaxRetry: 3,
+          maxFragLookUpTolerance: 0.25,
+          enableSoftwareAES: true,
+          startLevel: -1,
+          manifestLoadingTimeOut: 20000,
+          manifestLoadingMaxRetry: 4,
+          manifestLoadingRetryDelay: 1000,
+          levelLoadingTimeOut: 20000,
+          levelLoadingMaxRetry: 4,
+          fragLoadingTimeOut: 20000,
+          fragLoadingMaxRetry: 6
+        });
+        
         hlsInstanceRef.current = hls;
-        hls.loadSource(src);
-        hls.attachMedia(videoEl);
+        
+        // Enhanced error handling with logging
         hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data?.fatal) {
-            console.error('[HLS] Fatal error', data);
-            try { hls.destroy(); } catch {}
-            hlsInstanceRef.current = null;
+          console.error('[HLS] Error event:', {
+            type: data.type,
+            details: data.details,
+            fatal: data.fatal,
+            url: data.url,
+            response: data.response?.code
+          });
+          
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error('[HLS] Fatal network error, attempting recovery');
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error('[HLS] Fatal media error, attempting recovery');
+                hls.recoverMediaError();
+                break;
+              default:
+                console.error('[HLS] Unrecoverable error, destroying player');
+                try { hls.destroy(); } catch {}
+                hlsInstanceRef.current = null;
+                // Fallback to direct source (won't work but shows error)
+                videoEl.src = src;
+                break;
+            }
           }
         });
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log('[HLS] Manifest parsed successfully');
+        });
+        
+        hls.loadSource(src);
+        hls.attachMedia(videoEl);
       } else {
+        // No native support and hls.js not supported
+        console.error('[HLS] Neither native HLS nor hls.js is supported on this device');
+        console.error('[HLS] MSE supported:', 'MediaSource' in window);
+        console.error('[HLS] User Agent:', navigator.userAgent);
+        
+        // Try direct source as last resort (likely won't work)
         videoEl.src = src;
+        videoEl.load();
       }
     } else {
+      // Regular MP4 playback
       videoEl.src = src;
       videoEl.load();
     }
+    
     return () => {
       if (hlsInstanceRef.current) {
         try { hlsInstanceRef.current.destroy(); } catch {}
@@ -77,7 +158,13 @@ export function useVideoPlayer(selectedVideo, { onProgress, shows, nextUp, hidde
         // Set first track to 'showing' to make CC button visible
         tracks[0].mode = 'showing';
       }
-      v.play();
+      // Handle autoplay restrictions on mobile browsers
+      const playPromise = v.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.log('[VideoPlayer] Autoplay prevented (mobile browser restriction):', err.message);
+        });
+      }
       
       // If user is re-watching an item hidden from recents, unhide it
       if (onProgress) {
@@ -148,7 +235,10 @@ export function useVideoPlayer(selectedVideo, { onProgress, shows, nextUp, hidde
         const ahead = getBufferedAhead();
         if (ahead > 1) {
           if (v.paused) {
-            v.play().catch(() => {});
+            const playPromise = v.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(() => {});
+            }
           } else {
             // Gentle rate wobble to kick decoder without seeking (avoids control popup)
             const original = v.playbackRate;
@@ -193,4 +283,3 @@ export function useVideoPlayer(selectedVideo, { onProgress, shows, nextUp, hidde
 
   return { videoRef };
 }
-
