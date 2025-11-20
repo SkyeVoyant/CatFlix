@@ -17,6 +17,7 @@ Automatically scan, encode, enrich with metadata, generate subtitles, and stream
 
 ### Core Functionality
 - **🎬 Automatic HLS Encoding** – FFmpeg worker converts your media to adaptive HLS streams for smooth playback on any device
+- **📱 Universal Device Support** – Live on-the-fly remuxing for Samsung Browser and Apple devices; automatic fMP4 conversion with in-memory caching for maximum compatibility
 - **⚡ Instant Loading** – WebSocket streams content one-by-one for near-instant UI population; first items appear immediately while rest loads in background
 - **📊 Live Updates** – PostgreSQL-backed manifest with real-time synchronization; new content appears automatically without refresh
 - **🎭 Rich Metadata** – TMDb integration for posters, cast, trailers, ratings, and genre information
