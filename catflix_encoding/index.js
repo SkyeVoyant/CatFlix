@@ -786,7 +786,9 @@ function buildFfmpegArgs(job) {
     '-pix_fmt',
     'yuv420p',
     '-profile:v',
-    'high',
+    'baseline',
+    '-level',
+    '3.0',
     '-b:v',
     videoBitrate,
     '-maxrate',
@@ -850,14 +852,15 @@ function buildFfmpegArgs(job) {
 }
 
 function buildHlsFlags(resumeInfo) {
-  const flags = ['independent_segments'];
+  const flags = [];
+  // Removed 'independent_segments' - Samsung Smart TVs do not support this tag
   if (resumeInfo.appendList) {
     flags.push('append_list');
   }
   if (resumeInfo.discontStart) {
     flags.push('discont_start');
   }
-  return flags.join('+');
+  return flags.length > 0 ? flags.join('+') : 'single_file';
 }
 
 function parseResolution(value, fallbackHeight) {
