@@ -90,7 +90,7 @@ const HLS_FFMPEG_PRESET = process.env.HLS_FFMPEG_PRESET || 'slow';
 const HLS_FFMPEG_TUNE = process.env.HLS_FFMPEG_TUNE || '';
 const HLS_FFMPEG_THREADS = process.env.HLS_FFMPEG_THREADS || '';
 
-// Show encoding settings (with fallbacks to movie settings)
+// Show defaults inherit movie settings unless show-specific overrides are set.
 const SHOWS_HIGH_VIDEO_BITRATE = process.env.SHOWS_HIGH_VIDEO_BITRATE || HLS_HIGH_VIDEO_BITRATE;
 const SHOWS_HIGH_MAX_BITRATE = process.env.SHOWS_HIGH_MAX_BITRATE || HLS_HIGH_MAX_BITRATE;
 const SHOWS_HIGH_AUDIO_BITRATE = process.env.SHOWS_HIGH_AUDIO_BITRATE || HLS_HIGH_AUDIO_BITRATE;
@@ -852,15 +852,14 @@ function buildFfmpegArgs(job) {
 }
 
 function buildHlsFlags(resumeInfo) {
-  const flags = [];
-  // Removed 'independent_segments' - Samsung Smart TVs do not support this tag
+  const flags = ['independent_segments'];
   if (resumeInfo.appendList) {
     flags.push('append_list');
   }
   if (resumeInfo.discontStart) {
     flags.push('discont_start');
   }
-  return flags.length > 0 ? flags.join('+') : 'single_file';
+  return flags.join('+');
 }
 
 function parseResolution(value, fallbackHeight) {
@@ -985,7 +984,7 @@ async function notifyManifestUpdate(job) {
   const masterRelative = layout.masterRelative ? toPosix(layout.masterRelative) : null;
   if (!masterRelative) return;
   const payload = {
-    type: job.type,
+    type: job.type === 'episode' ? 'show' : job.type,
     masterRelative,
     descriptor: job.displayName || layout.baseName || job.baseName || 'stream'
   };
