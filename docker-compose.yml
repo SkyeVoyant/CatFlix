@@ -1,10 +1,23 @@
 services:
+  catflix-db:
+    image: postgres:16-alpine
+    container_name: CatFlixDB
+    environment:
+      - POSTGRES_DB=${PGDATABASE:-CatFlixDB}
+      - POSTGRES_USER=${PGUSER:-catflix}
+      - POSTGRES_PASSWORD=${PGPASSWORD:-catflix}
+    volumes:
+      - catflix_db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${PGPORT:-5434}:5432"
+    restart: unless-stopped
+    networks:
+      - catflix-net
+
   catflix-app:
     build: .
     container_name: CatFlixApp
     image: catflix-app:latest
-    ports:
-      - "3004:3004"
     env_file:
       - .env
     environment:
@@ -13,12 +26,12 @@ services:
       - PGHOST=catflix-db
       - PGPORT=5432
       - PGUSER=catflix
-      - PGPASSWORD=catflix
+      - PGPASSWORD=${PGPASSWORD}
       - PGDATABASE=CatFlixDB
       - MEDIA_DIR_CONTAINER=/media
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
     volumes:
-      - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
+      - "${MEDIA_MOUNT_SOURCE}:/media:rw,rslave"
     restart: unless-stopped
     networks:
       - catflix-net
@@ -34,13 +47,13 @@ services:
       - PGHOST=catflix-db
       - PGPORT=5432
       - PGUSER=catflix
-      - PGPASSWORD=catflix
+      - PGPASSWORD=${PGPASSWORD}
       - PGDATABASE=CatFlixDB
       - MEDIA_DIR_CONTAINER=/media
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
       - CATFLIX_NOTIFY_URL=${CATFLIX_NOTIFY_URL:-http://catflix-app:3004/api/media/notify}
     volumes:
-      - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
+      - "${MEDIA_MOUNT_SOURCE}:/media:rw,rslave"
     command: ["node", "../catflix_encoding/index.js"]
     restart: unless-stopped
     networks:
@@ -57,19 +70,20 @@ services:
       - PGHOST=catflix-db
       - PGPORT=5432
       - PGUSER=catflix
-      - PGPASSWORD=catflix
+      - PGPASSWORD=${PGPASSWORD}
       - PGDATABASE=CatFlixDB
       - MEDIA_DIR_CONTAINER=/media
-      - MEDIA_DIR=${MEDIA_MOUNT_SOURCE:-/media}
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
     volumes:
-      - "${MEDIA_MOUNT_SOURCE:-/media}:/media"
+      - "${MEDIA_MOUNT_SOURCE}:/media:rw,rslave"
       - "./catflix_subtitles/subtitles:/app/subtitles"
-    ports:
-      - "3006:3006"
     restart: unless-stopped
     networks:
       - catflix-net
+
+volumes:
+  catflix_db_data:
+    name: catflix_db_data
 
 networks:
   catflix-net:
