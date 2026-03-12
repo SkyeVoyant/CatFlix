@@ -1,7 +1,6 @@
 /**
- * Live HLS Remux Service
- * Converts .ts segments to .m4s (fMP4) on-the-fly for Samsung Browser and Apple devices
- * Uses in-memory cache with TTL for performance
+ * Live HLS remuxing helpers.
+ * Converts transport stream segments to fMP4 and caches generated payloads in memory.
  */
 
 const { spawn } = require('child_process');
@@ -9,26 +8,26 @@ const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
 
-// In-memory cache for remuxed segments
+// In-memory cache for remuxed segment payloads.
 const segmentCache = new Map();
 const playlistCache = new Map();
 
-// Cache TTL: 30 minutes (segments are immutable once created)
+// Segment payloads are immutable, so they can be cached for longer.
 const SEGMENT_CACHE_TTL = 30 * 60 * 1000;
-const PLAYLIST_CACHE_TTL = 5 * 1000; // 5 seconds for playlists
+const PLAYLIST_CACHE_TTL = 5 * 1000;
 
-// Cleanup interval: every 5 minutes
+// Periodically evict expired cache entries.
 setInterval(() => {
   const now = Date.now();
   
-  // Clean up expired segments
+  // Remove expired segment entries.
   for (const [key, entry] of segmentCache.entries()) {
     if (now - entry.timestamp > SEGMENT_CACHE_TTL) {
       segmentCache.delete(key);
     }
   }
   
-  // Clean up expired playlists
+  // Remove expired playlist entries.
   for (const [key, entry] of playlistCache.entries()) {
     if (now - entry.timestamp > PLAYLIST_CACHE_TTL) {
       playlistCache.delete(key);
@@ -37,19 +36,19 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 /**
- * Generate cache key for a file
+ * Build a stable cache key from source content metadata.
  */
 function getCacheKey(filePath) {
   return crypto.createHash('md5').update(filePath).digest('hex');
 }
 
 /**
- * Remux a .ts segment to .m4s (fMP4) format
+ * Remux a .ts segment into fMP4 bytes.
  */
 async function remuxSegment(tsFilePath) {
   const cacheKey = getCacheKey(tsFilePath);
   
-  // Check cache first
+  // Serve from cache when possible.
   const cached = segmentCache.get(cacheKey);
   if (cached) {
     return cached.data;
@@ -60,7 +59,7 @@ async function remuxSegment(tsFilePath) {
     
     const ffmpeg = spawn('ffmpeg', [
       '-i', tsFilePath,
-      '-c', 'copy', // No re-encoding
+      '-c', 'copy',
       '-map', '0',
       '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
@@ -79,7 +78,7 @@ async function remuxSegment(tsFilePath) {
       if (code === 0) {
         const buffer = Buffer.concat(chunks);
         
-        // Cache the result
+        // Cache the generated fMP4 payload.
         segmentCache.set(cacheKey, {
           data: buffer,
           timestamp: Date.now()
@@ -98,33 +97,32 @@ async function remuxSegment(tsFilePath) {
 }
 
 /**
- * Convert .m3u8 playlist to reference .m4s segments instead of .ts
+ * Convert a transport-stream playlist to fMP4 segment references.
  */
 async function convertPlaylist(playlistPath, playlistContent) {
   const cacheKey = getCacheKey(playlistPath + playlistContent);
   
-  // Check cache first
+  // Serve from cache when possible.
   const cached = playlistCache.get(cacheKey);
   if (cached) {
     return cached.data;
   }
   
-  // Replace .ts references with .m4s and add remux parameter
+  // Rewrite segment references to use remuxed fMP4 endpoints.
   let converted = playlistContent.replace(/(\S+)\.ts(\s|$)/gm, '$1.m4s?remux=fmp4$2');
   
-  // Remove #EXT-X-INDEPENDENT-SEGMENTS (Samsung devices don't support this)
+  // Drop unsupported directives for less-capable players.
   converted = converted.replace(/#EXT-X-INDEPENDENT-SEGMENTS\s*\n?/g, '');
   
-  // Add #EXT-X-MAP for fMP4 init segment if not present
-  // (We'll generate init segment on-the-fly from first segment)
+  // Add an init-segment map for fMP4 playlists when missing.
   if (converted.includes('.m4s') && !converted.includes('#EXT-X-MAP')) {
-    // Find first segment reference
+    // Find the first segment so the init path can be derived.
     const firstSegmentMatch = converted.match(/([^\s\n?]+\.m4s)/);
     if (firstSegmentMatch) {
       const firstSegment = firstSegmentMatch[1];
       const initSegmentName = firstSegment.replace(/\d+\.m4s$/, 'init.mp4');
       
-      // Insert #EXT-X-MAP after #EXT-X-MEDIA-SEQUENCE or #EXT-X-VERSION
+      // Insert EXT-X-MAP near the playlist header directives.
       const lines = converted.split('\n');
       const insertIndex = lines.findIndex(line => 
         line.startsWith('#EXT-X-MEDIA-SEQUENCE') || 
@@ -138,10 +136,10 @@ async function convertPlaylist(playlistPath, playlistContent) {
     }
   }
   
-  // Update version to 7 for fMP4 support
+  // Version 7 advertises fMP4 support.
   converted = converted.replace(/#EXT-X-VERSION:\d+/, '#EXT-X-VERSION:7');
   
-  // Cache the result
+  // Cache the rewritten playlist body.
   playlistCache.set(cacheKey, {
     data: converted,
     timestamp: Date.now()
@@ -151,12 +149,12 @@ async function convertPlaylist(playlistPath, playlistContent) {
 }
 
 /**
- * Generate fMP4 init segment from first .ts segment
+ * Generate an fMP4 init segment from a source TS segment.
  */
 async function generateInitSegment(tsFilePath) {
   const cacheKey = getCacheKey(tsFilePath + '_init');
   
-  // Check cache first
+  // Serve from cache when possible.
   const cached = segmentCache.get(cacheKey);
   if (cached) {
     return cached.data;
@@ -172,7 +170,7 @@ async function generateInitSegment(tsFilePath) {
       '-c', 'copy',
       '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      '-t', '0.1', // Just need header info
+      '-t', '0.1',
       'pipe:1'
     ]);
     
@@ -188,7 +186,7 @@ async function generateInitSegment(tsFilePath) {
       if (code === 0) {
         const buffer = Buffer.concat(chunks);
         
-        // Cache the result
+        // Cache the generated init segment.
         segmentCache.set(cacheKey, {
           data: buffer,
           timestamp: Date.now()
@@ -224,4 +222,3 @@ module.exports = {
   generateInitSegment,
   getCacheStats
 };
-

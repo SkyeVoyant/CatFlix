@@ -771,6 +771,7 @@ function ensureShowEpisodeEntry(show, {
     });
   }
   let episode = season.episodes.find((ep) => ep.relative === relative);
+  const now = Date.now();
   if (!episode) {
     episode = {
       id: generateEpisodeId(season.id, relative, descriptor),
@@ -778,7 +779,7 @@ function ensureShowEpisodeEntry(show, {
       relative,
       src: toVideoSrc(relative),
       episodeNumber: Number.isFinite(episodeNumber) ? episodeNumber : inferEpisodeNumber(descriptor),
-      addedAt: Date.now(),
+      addedAt: now,
       previewSrc: null,
       sourceType: sourceType || 'hls'
     };
@@ -786,10 +787,12 @@ function ensureShowEpisodeEntry(show, {
   } else {
     episode.title = descriptor;
     episode.episodeNumber = Number.isFinite(episodeNumber) ? episodeNumber : episode.episodeNumber;
-    episode.addedAt = Date.now();
+    episode.addedAt = now;
     episode.sourceType = sourceType || episode.sourceType || 'hls';
     episode.src = toVideoSrc(relative);
   }
+  // Update show's addedAt when a new episode is added/updated so it appears in recently added
+  target.addedAt = now;
   sortSeasonEpisodes(season);
   sortShowSeasons(target);
   return target;
