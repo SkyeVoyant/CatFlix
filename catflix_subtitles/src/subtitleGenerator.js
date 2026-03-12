@@ -25,11 +25,10 @@ function sanitizeSegment(value, fallback = 'Unknown', options = {}) {
 }
 
 function getMovieSubtitlePath(movieTitle) {
-  // Create a safe filename from the movie title
-  // Remove special characters, keep spaces, make it filesystem-safe
+  // Normalize the title to a filesystem-safe filename.
   const safeTitle = sanitizeSegment(movieTitle, 'Movie');
   
-  // Structure: movies/moviename.json
+  // Structure: movies/<movie>.json
   const subtitlePath = `movies/${safeTitle}.json`;
   
   return subtitlePath;
@@ -57,7 +56,7 @@ function getEpisodeSubtitlePath(showTitle, seasonLabel, episodeDisplayName) {
 
   const safeEpisodeName = sanitizeSegment(episodeDisplayName, 'Episode');
   
-  // Structure: shows/showname/season n/episodename.json
+  // Structure: shows/<show>/season <n>/<episode>.json
   const subtitlePath = `shows/${safeShowTitle}/${safeSeason}/${safeEpisodeName}.json`;
   
   return subtitlePath;
@@ -70,10 +69,10 @@ async function saveSubtitleFile(subtitlePath, subtitleData) {
   const fullPath = path.join(config.SUBTITLES_DIR, subtitlePath);
   const dir = path.dirname(fullPath);
   
-  // Ensure directory exists
+  // Ensure the nested subtitle directory exists.
   await fs.mkdir(dir, { recursive: true });
   
-  // Write JSON file with pretty formatting (2 spaces indent)
+  // Persist readable JSON for manual inspection and edits.
   const jsonContent = JSON.stringify(subtitleData, null, 2);
   await fs.writeFile(fullPath, jsonContent, 'utf-8');
   
@@ -87,4 +86,3 @@ module.exports = {
   getEpisodeSubtitlePath,
   saveSubtitleFile
 };
-

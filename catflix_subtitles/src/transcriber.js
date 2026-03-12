@@ -18,47 +18,17 @@ async function transcribeAudio(audioPath) {
   console.log(`[transcriber] Audio file: ${audioPath}`);
   
   try {
-    // Whisper command with anti-hallucination settings:
-    // --condition_on_previous_text False: Prevents repetitive hallucinations
-    // --no_speech_threshold 0.6: Higher threshold to ignore silence (default is 0.6, we use 0.6)
-    // --logprob_threshold -1.0: Filters out low-confidence segments
-    // --compression_ratio_threshold 2.4: Rejects repetitive text
-    // --fp16 False: Use FP32 instead of FP16 (required for CPU-only systems)
-    // --beam_size 5: Standard beam search for quality
-    // Note: initial_prompt removed to prevent prompt text from leaking into transcription
-    const command = `whisper "${audioPath}" --model ${model} --output_format json --output_dir "${outputDir}" --task transcribe --temperature 0.0 --beam_size 5 --condition_on_previous_text False --no_speech_threshold 0.6 --logprob_threshold -1.0 --compression_ratio_threshold 2.4 --fp16 False`;
+    // Whisper is configured to prefer stable dialogue segments and reject noisy artifacts.
+    const command = `whisper "${audioPath}" --model ${model} --output_format json --output_dir "${outputDir}" --task transcribe --temperature 0.0 --beam_size 5 --best_of 5 --condition_on_previous_text False --no_speech_threshold 0.6 --logprob_threshold -1.0 --compression_ratio_threshold 2.4`;
     
     console.log(`[transcriber] Running: ${command}`);
     console.log(`[transcriber] Anti-hallucination settings enabled`);
     console.log(`[transcriber] This may take ~15-30 minutes for a 2-hour movie with the small model...`);
     
-    let stdout, stderr;
-    try {
-      const result = await execAsync(command, {
-        maxBuffer: 100 * 1024 * 1024, // 100MB buffer - whisper outputs a lot to stderr
-        timeout: 7200000, // 2 hour timeout for long movies
-        killSignal: 'SIGTERM'
-      });
-      stdout = result.stdout;
-      stderr = result.stderr;
-    } catch (execError) {
-      // Command failed - log the actual error details
-      console.error(`[transcriber] Whisper command failed with exit code:`, execError.code);
-      console.error(`[transcriber] Signal:`, execError.signal);
-      console.error(`[transcriber] Killed:`, execError.killed);
-      console.error(`[transcriber] Error message:`, execError.message);
-      if (execError.stdout) {
-        console.error(`[transcriber] stdout (first 1000 chars):`, execError.stdout.substring(0, 1000));
-      }
-      if (execError.stderr) {
-        console.error(`[transcriber] stderr (first 1000 chars):`, execError.stderr.substring(0, 1000));
-      }
-      // If killed by timeout or buffer, give more specific error
-      if (execError.killed) {
-        throw new Error(`Whisper process was killed (likely timeout or buffer overflow)`);
-      }
-      throw new Error(`Whisper command failed: ${execError.stderr || execError.message}`);
-    }
+    const { stdout, stderr } = await execAsync(command, {
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large outputs
+      timeout: 3600000 // 1 hour timeout (transcription can take a while)
+    });
     
     if (stdout) {
       // Whisper verbose output shows progress - log it
@@ -72,10 +42,13 @@ async function transcribeAudio(audioPath) {
     
     if (stderr) {
       // Whisper often outputs progress to stderr too
-      console.log(`[transcriber] Whisper stderr output:`, stderr.substring(0, 500));
+      const stderrLines = stderr.split('\n').filter(line => line.trim());
+      if (stderrLines.length > 0 && !stderrLines[0].includes('CUDA') && !stderrLines[0].includes('warning')) {
+        console.log(`[transcriber] Whisper output:`, stderrLines.slice(0, 5).join(' | '));
+      }
     }
     
-    // Whisper outputs JSON file with same name as input (without extension) + .json
+    // Whisper writes JSON next to the source audio using the same basename.
     const jsonPath = path.join(outputDir, `${baseName}.json`);
     
     // Check if the JSON file was created
@@ -89,7 +62,7 @@ async function transcribeAudio(audioPath) {
     const jsonContent = await fs.readFile(jsonPath, 'utf-8');
     const transcription = JSON.parse(jsonContent);
     
-    // Clean up Whisper's JSON output file (we've already read it)
+    // The parsed payload is returned, so the temporary output file can be removed.
     await fs.unlink(jsonPath).catch(() => {});
     
     console.log(`[transcriber] Transcription complete`);
@@ -102,7 +75,7 @@ async function transcribeAudio(audioPath) {
 }
 
 /**
- * Filter out common Whisper hallucinations and artifacts
+ * Remove short/duplicate low-signal subtitle segments from Whisper output.
  */
 function filterHallucinations(segments) {
   const HALLUCINATION_PATTERNS = [
@@ -118,11 +91,6 @@ function filterHallucinations(segments) {
     /^\(music\)\.?$/i,
     /^\.+$/,  // Just dots
     /^,+$/,   // Just commas
-    // Filter out the initial prompt text that sometimes leaks into results
-    /this is a movie dialogue/i,
-    /clear speech/i,
-    /avoid filler/i,
-    /^this is a movie dialogue with clear speech\.?\s*avoid filler words\.?$/i,
   ];
 
   const filtered = [];
@@ -138,14 +106,13 @@ function filterHallucinations(segments) {
     // Skip very short duration segments (< 0.5 seconds) - likely artifacts
     if (duration < 0.5) continue;
     
-    // Skip known hallucination patterns
+    // Drop known repeated artifacts.
     if (HALLUCINATION_PATTERNS.some(pattern => pattern.test(text))) {
       console.log(`[filter] Removed hallucination: "${text}" at ${segment.start.toFixed(1)}s`);
       continue;
     }
     
-    // Detect repetitive patterns (same text appearing regularly)
-    // If we see the same short text (< 15 chars) more than 3 times, it's likely a hallucination
+    // Repeated short phrases at regular intervals are usually transcription artifacts.
     if (text.length < 15) {
       if (!timestamps.has(text)) {
         timestamps.set(text, []);
@@ -154,7 +121,7 @@ function filterHallucinations(segments) {
       
       const occurrences = timestamps.get(text);
       if (occurrences.length > 3) {
-        // Check if they appear at regular intervals (hallucination pattern)
+        // Evenly spaced repeats indicate non-dialogue artifacts.
         const intervals = [];
         for (let i = 1; i < occurrences.length; i++) {
           intervals.push(occurrences[i] - occurrences[i-1]);
@@ -227,4 +194,3 @@ module.exports = {
   transcribeAudio,
   convertToSubtitleFormat
 };
-
