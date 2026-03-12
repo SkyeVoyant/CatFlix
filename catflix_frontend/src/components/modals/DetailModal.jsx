@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 
 export function DetailModal({
   showDetail,
@@ -12,50 +12,140 @@ export function DetailModal({
   onDownloadSeason,
   onPlayEpisode
 }) {
+  const modalContentRef = useRef(null);
+  const touchStartRef = useRef(null);
+
+  useEffect(() => {
+    if (showDetail) {
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      // Focus element for TV navigation
+      if (modalContentRef.current) {
+        modalContentRef.current.focus();
+      }
+    } else {
+      document.body.style.overflow = 'unset';
+      document.documentElement.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+      document.documentElement.style.overflow = 'unset';
+    };
+  }, [showDetail]);
+
   if (!showDetail) return null;
 
-  const getRatingDescription = (certification) => {
-    const ratingDescriptions = {
-      'G': 'General Audiences - All ages admitted',
-      'PG': 'Parental Guidance Suggested - Some material may not be suitable for children',
-      'PG-13': 'Parents Strongly Cautioned - Some material may be inappropriate for children under 13',
-      'R': 'Restricted - Under 17 requires accompanying parent or adult guardian',
-      'NC-17': 'Adults Only - No one 17 and under admitted',
-      'TV-Y': 'General Audiences - All children',
-      'TV-Y7': 'General Audiences - Directed to older children',
-      'TV-G': 'General Audiences - Most parents would find this suitable for all ages',
-      'TV-PG': 'Parental Guidance Suggested - May contain material parents might find unsuitable for younger children',
-      'TV-14': 'Parents Strongly Cautioned - May be unsuitable for children under 14',
-      'TV-MA': 'Restricted - Specifically designed to be viewed by adults'
-    };
-    return ratingDescriptions[certification] || certification;
-  };
+  const formatRating = (rating) => {
+    if (!rating || rating === 'N/A' || rating === 'NA' || rating === '') {
+      return 'N/A';
+    }
 
-  const translateTVRating = (tvRating) => {
-    const translations = {
-      'TV-Y': 'G (General Audiences)',
-      'TV-Y7': 'G (General Audiences)',
-      'TV-G': 'G (General Audiences)',
-      'TV-PG': 'PG (Parental Guidance Suggested)',
-      'TV-14': 'PG-13 (Parents Strongly Cautioned)',
-      'TV-MA': 'R (Restricted)'
+    // First, convert TV ratings to movie ratings
+    const tvToMovie = {
+      'TV-Y': 'G',
+      'TV-Y7': 'G',
+      'TV-G': 'G',
+      'TV-PG': 'PG',
+      'TV-14': 'PG-13',
+      'TV-MA': 'R'
     };
-    return translations[tvRating] || tvRating;
+
+    // Normalize the rating (handle TV ratings)
+    let normalizedRating = rating;
+    if (tvToMovie[rating]) {
+      normalizedRating = tvToMovie[rating];
+    }
+
+    // Format all ratings in the standard format
+    const ratingFormats = {
+      'G': 'G (General Audiences)',
+      'PG': 'PG (Parental Guidance Suggested)',
+      'PG-13': 'PG-13 (Parents Strongly Cautioned)',
+      'R': 'R (Restricted)',
+      'NC-17': 'NC-17 (Adults Only)',
+      'NR': 'NR (Not Rated)'
+    };
+
+    return ratingFormats[normalizedRating] || rating;
   };
 
   const getCertification = () => {
-    if (showDetail.type === 'movie') {
-      const cert = showDetail.meta?.release_dates?.results.find(r => r.iso_3166_1 === 'US')?.release_dates[0].certification;
-      return cert || 'N/A';
+    let rating = null;
+
+    // First check the direct certification field (from database)
+    if (showDetail.meta?.certification) {
+      rating = showDetail.meta.certification;
+    }
+    // Fall back to nested structure if direct field is not available
+    else if (showDetail.type === 'movie') {
+      const usRelease = showDetail.meta?.release_dates?.results.find(r => r.iso_3166_1 === 'US');
+      if (usRelease?.release_dates) {
+        // Try type 3 (theatrical) first, then type 2 (limited), then type 4 (digital)
+        const type3 = usRelease.release_dates.find(rd => rd.type === 3)?.certification;
+        const type2 = usRelease.release_dates.find(rd => rd.type === 2)?.certification;
+        const type4 = usRelease.release_dates.find(rd => rd.type === 4)?.certification;
+        rating = type3 || type2 || type4 || usRelease.release_dates[0]?.certification;
+      }
     } else {
-      const tvRating = showDetail.meta?.content_ratings?.results.find(r => r.iso_3166_1 === 'US')?.rating;
-      return tvRating ? translateTVRating(tvRating) : 'N/A';
+      rating = showDetail.meta?.content_ratings?.results.find(r => r.iso_3166_1 === 'US')?.rating;
+    }
+
+    return formatRating(rating);
+  };
+
+  const getCast = () => {
+    const cast = Array.isArray(showDetail.meta?.credits?.cast)
+      ? showDetail.meta.credits.cast
+        .filter((member) => member && member.name)
+        .sort((a, b) => {
+          const orderA = Number.isFinite(a.order) ? a.order : 999;
+          const orderB = Number.isFinite(b.order) ? b.order : 999;
+          return orderA - orderB;
+        })
+        .slice(0, 12)
+      : [];
+    return cast;
+  };
+
+  const cast = getCast();
+
+  const handleWheel = (e) => {
+    if (modalContentRef.current && e.target === e.currentTarget) {
+      modalContentRef.current.scrollTop += e.deltaY;
+    }
+  };
+
+  const handleTouchStart = (e) => {
+    if (e.target === e.currentTarget) {
+      touchStartRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (modalContentRef.current && e.target === e.currentTarget && touchStartRef.current !== null) {
+      const touchY = e.touches[0].clientY;
+      const deltaY = touchStartRef.current - touchY;
+      modalContentRef.current.scrollTop += deltaY;
+      touchStartRef.current = touchY;
     }
   };
 
   return (
-    <div className="modal" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
+    <div
+      className="modal"
+      onClick={onClose}
+      onWheel={handleWheel}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+    >
+
+      <div
+        className="modal-content"
+        onClick={e => e.stopPropagation()}
+        ref={modalContentRef}
+        tabIndex="-1"
+        style={{ outline: 'none' }}
+      >
         <button className="modal-close-btn" onClick={onClose}>X</button>
         <div className="detail-top">
           {showDetail.meta?.poster_path && (
@@ -75,9 +165,22 @@ export function DetailModal({
                 {showDetail.meta.vote_average && (
                   <p><strong>Rating:</strong> {showDetail.meta.vote_average}/10</p>
                 )}
-                {(showDetail.meta.release_dates || showDetail.meta.content_ratings) && (
-                  <p><strong>Certification:</strong> {getCertification()}</p>
-                )}
+                <p><strong>Certification:</strong> {getCertification()}</p>
+              </div>
+            )}
+            {cast.length > 0 && (
+              <div className="cast-section">
+                <h3>Cast</h3>
+                <ul>
+                  {cast.map((member) => (
+                    <li key={member.credit_id || member.id || member.name}>
+                      <span className="cast-name-text">{member.name}</span>
+                      {member.character && (
+                        <span className="cast-character-text"> as {member.character}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             {showDetail.type === 'movie' && (

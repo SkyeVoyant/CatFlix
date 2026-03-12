@@ -734,6 +734,27 @@
   flex-direction: column;
   gap: 20px;
 }
+
+.cast-section {
+  margin-top: 16px;
+}
+.cast-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.cast-section li {
+  margin: 4px 0;
+  color: #ccc;
+}
+.cast-section .cast-name-text {
+  color: #fff;
+  font-weight: 400;
+}
+.cast-section .cast-character-text {
+  color: #bbb;
+}
+
 @media (min-width: 1420px) {
   .detail-top {
     flex-direction: row;
